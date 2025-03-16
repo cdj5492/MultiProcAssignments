@@ -54,4 +54,5 @@ spack env activate cmpe-655
 # indicated by the -n option. If these do not, your results will
 # not be valid or you may have wasted resources that others could
 # have used. Using $SLURM_NPROCS guarantees a match.
-srun -n $SLURM_NPROCS mpi_hh -d 15 -c 10
+# srun -n $SLURM_NPROCS mpi_hh -d 15 -c 10
+srun -n 6 mpi_hh -d 1501 -c 10
