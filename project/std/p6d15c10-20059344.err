@@ -1,9 +1,0 @@
-slurmstepd: error: execve(): mpi_hh: No such file or directory
-slurmstepd: error: execve(): mpi_hh: No such file or directory
-slurmstepd: error: execve(): mpi_hh: No such file or directory
-slurmstepd: error: execve(): mpi_hh: No such file or directory
-slurmstepd: error: execve(): mpi_hh: No such file or directory
-srun: error: skl-a-09: tasks 4-5: Exited with exit code 2
-srun: error: skl-a-05: tasks 0-2: Exited with exit code 2
-slurmstepd: error: execve(): mpi_hh: No such file or directory
-srun: error: skl-a-08: task 3: Exited with exit code 2

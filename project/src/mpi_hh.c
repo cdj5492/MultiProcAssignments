@@ -40,12 +40,21 @@
  *
  * Description:
  * The master process
+ * 
+ * Parameters:
+ * @param rank       MPI rank of this node
+ * @param num_tasks  total number of MPI tasks
+ * @param num_dendrs number of simulated dendrites
+ * @param num_comps  number of simulated compartments
 */
-void soma(int rank, int num_tasks) {
-  CmdArgs cmd_args;                       // Command line arguments.
-  int num_comps, num_dendrs;              // Simulation parameters.
-  int i, j, t_ms, step, dendrite;         // Various indexing variables.
+void soma_runner(int num_tasks, int num_dendrs, int num_comps) {
   struct timeval start, stop, diff;       // Values used to measure time.
+  int dest, t_ms, step;                   // indexing vars
+
+  // message receive status
+  MPI_Status status;
+
+  double current; // for accumulating dendrite currents
 
   double exec_time;  // How long we take.
 
@@ -65,11 +74,10 @@ void soma(int rank, int num_tasks) {
   // Strings used to store filenames for the graph and data files.
   char time_str[14];
 
-  // MPI information
-  int numtasks, rank, rc;
-
   printf( "Simulating %d dendrites with %d compartments per dendrite.\n",
       num_dendrs, num_comps );
+
+  printf("Simulating with num_tasks = %d\n", num_tasks);
 
   //////////////////////////////////////////////////////////////////////////////
   // Create files where results will be stored.
@@ -160,14 +168,13 @@ void soma(int rank, int num_tasks) {
     for (step = 0; step < STEPS; step++) {
       // send values to workers to start working this step (y[0], soma_params[0])
       // can't use MPI_Bcast for this assignment, so just use a for loop
-      for (int dest = 1; dest < num_tasks; dest++) {
+      for (dest = 1; dest < num_tasks; dest++) {
         MPI_Send(&y[0], 1, MPI_DOUBLE, dest, 1, MPI_COMM_WORLD);
         MPI_Send(&soma_params[0], 1, MPI_DOUBLE, dest, 2, MPI_COMM_WORLD);
       }
       // wait for workers to get back with soma_params[2] contributions
       soma_params[2] = 0.0;
-      for (int dest = 1; dest < num_tasks; dest++) {
-        double current;
+      for (dest = 1; dest < num_tasks; dest++) {
         MPI_Recv(&current, 1, MPI_DOUBLE, MPI_ANY_SOURCE, 3, MPI_COMM_WORLD, &status);
         soma_params[2] += current;
       }
@@ -180,13 +187,12 @@ void soma(int rank, int num_tasks) {
       // soma, injects current, and calculates action potential. Good stuff.
       soma(dydt, y, soma_params);
       rk4Step(y, y0, dydt, NUMVAR, soma_params, 1, soma);
-
-      // Record the membrane potential of the soma at this simulation step.
-      // Let's show where we are in terms of computation.
-      printf("\r%02d ms",t_ms); fflush(stdout);
-
-      res[t_ms] = y[0];
     }
+    // Record the membrane potential of the soma at this simulation step.
+    // Let's show where we are in terms of computation.
+    printf("\r%02d ms",t_ms); fflush(stdout);
+
+    res[t_ms] = y[0];
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -207,7 +213,7 @@ void soma(int rank, int num_tasks) {
        "Compartments: %d, Dendrites: %d, Execution time: %f s, "
        "Slave processes: %d\n",
        COMPTIME, soma_params[0], num_comps - 2, num_dendrs, exec_time,
-       0 );
+       num_tasks );
   fprintf( data_file, "# X Y\n");
 
   for (t_ms = 0; t_ms < COMPTIME; t_ms++) {
@@ -225,7 +231,7 @@ void soma(int rank, int num_tasks) {
     pinfo.num_comps = num_comps - 2;
     pinfo.num_dendrs = num_dendrs;
     pinfo.exec_time = exec_time;
-    pinfo.slaves = 0;
+    pinfo.slaves = num_tasks;
   }
 
   if (ISDEF_PLOT_PNG) {    plotData( &pinfo, data_fname, graph_fname ); }
@@ -238,25 +244,49 @@ void soma(int rank, int num_tasks) {
  * 
  * Description:
  * Runs for each worker process
+ * 
+ * Parameters:
+ * @param rank       MPI rank of this node
+ * @param num_tasks  total number of MPI tasks
+ * @param num_dendrs number of simulated dendrites
+ * @param num_comps  number of simulated compartments
  */
-void worker(int rank, int num_tasks, int num_dendrs, int num_comps) {
+void worker_runner(int rank, int num_tasks, int num_dendrs, int num_comps) {
   double current, **dendr_volt;
-  int worker_num_dentrs;
+  int worker_num_dendrs;
+
+  int i, j, dendrite, global_dendrite, t_ms, step; // Various indexing variables.
 
   double worker_y_0, worker_soma_params_0, worker_soma_params_2;
+
+  MPI_Status status;
+
+  // compute worker's ID (ranks 1...num_tasks-1 are workers)
+  int worker_id = rank - 1;
+
+  // compute base number and extra dendrites for uneven distribution.
+  int base = num_dendrs / (num_tasks - 1);
+  int extra = num_dendrs % (num_tasks - 1);
+
+
 
   //////////////////////////////////////////////////////////////////////////////
   // Initialize simulation parameters.
   //////////////////////////////////////////////////////////////////////////////
 
-  // number of dendrites this worker has to deal with.
-  // Need to subtract 1 from everything related to task numbers due to rank 0
-  // not being a worker.
-  worker_num_dentrs = num_dendrs/(num_tasks-1) + (((num_dendrs - num_tasks-1) > rank-1) ? 1 : 0);
+  // global offset for this worker
+  int global_offset;
+  if (worker_id < extra)
+    global_offset = worker_id * (base + 1);
+  else
+    global_offset = extra * (base + 1) + (worker_id - extra) * base;
+
+  // Determine number of dendrites for this worker.
+  worker_num_dendrs = base + (worker_id < extra ? 1 : 0);
 
   // Initialize the potential of each dendrite compartment to the rest voltage.
-  dendr_volt = (double**) malloc(worker_num_dentrs * sizeof(double*));
-  for (i = 0; i < num_dendrs; i++) {
+  dendr_volt = (double**) malloc(worker_num_dendrs * sizeof(double*));
+  for (i = 0; i < worker_num_dendrs; i++) {
     dendr_volt[i] = (double*) malloc( num_comps * sizeof(double) );
     for (j = 0; j < num_comps; j++) {
       dendr_volt[i][j] = VREST;
@@ -273,17 +303,18 @@ void worker(int rank, int num_tasks, int num_dendrs, int num_comps) {
     for (step = 0; step < STEPS; step++) {
 
       // Wait for message from soma to begin calculating this step (y[0], soma_params[0])
-      MPI_Recv(&worker_y_0, 1, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
-      MPI_Recv(&worker_soma_params_0, 1, MPI_DOUBLE, 0, 2, MPI_COMM_WORLD);
+      MPI_Recv(&worker_y_0, 1, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, &status);
+      MPI_Recv(&worker_soma_params_0, 1, MPI_DOUBLE, 0, 2, MPI_COMM_WORLD, &status);
 
       worker_soma_params_2 = 0.0;
 
       // Loop over all the dendrites this worker is assigned 
-      for (dendrite = 0; dendrite < worker_num_dentrs; dendrite++) {
+      for (dendrite = 0; dendrite < worker_num_dendrs; dendrite++) {
+        global_dendrite = global_offset + dendrite;
         // This will update Vm in all compartments and will give a new injected
         // current value from last compartment into the soma.
         current = dendriteStep( dendr_volt[ dendrite ],
-                    step + dendrite + 1, // TODO: Correct dendrite here to refer to the global dendrite index rather than local
+                    step + global_dendrite + 1,
                     num_comps,
                     worker_soma_params_0,
                     worker_y_0 );
@@ -300,7 +331,7 @@ void worker(int rank, int num_tasks, int num_dendrs, int num_comps) {
   // Free up allocated memory.
   //////////////////////////////////////////////////////////////////////////////
 
-  for(i = 0; i < num_dendrs; i++) {
+  for(i = 0; i < worker_num_dendrs; i++) {
     free(dendr_volt[i]);
   }
   free(dendr_volt);
@@ -318,6 +349,12 @@ void worker(int rank, int num_tasks, int num_dendrs, int num_comps) {
 */
 int main( int argc, char **argv )
 {
+  CmdArgs cmd_args;                       // Command line arguments.
+
+  int num_tasks, rank, rc;                // MPI vars
+  int num_comps, num_dendrs;              // Simulation parameters.
+
+
   // MPI initialization and node params
   rc = MPI_Init(&argc, &argv);
   if (rc != MPI_SUCCESS) {
@@ -325,7 +362,7 @@ int main( int argc, char **argv )
     MPI_Abort(MPI_COMM_WORLD, rc);
   }
 
-  MPI_Comm_size(MPI_COMM_WORLD, &numtasks);
+  MPI_Comm_size(MPI_COMM_WORLD, &num_tasks);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   //////////////////////////////////////////////////////////////////////////////
@@ -343,9 +380,9 @@ int main( int argc, char **argv )
 
   // determine whether the rank denotes this runner as the soma or as a dendrite worker
   if (rank == 0) {
-    soma(rank, num_tasks);
+    soma_runner(num_tasks, num_dendrs, num_comps);
   } else {
-    worker(rank, num_tasks, num_dendrs, num_comps);
+    worker_runner(rank, num_tasks, num_dendrs, num_comps);
   }
 
   MPI_Finalize();
