@@ -175,7 +175,7 @@ void soma_runner(int num_tasks, int num_dendrs, int num_comps) {
       // wait for workers to get back with soma_params[2] contributions
       soma_params[2] = 0.0;
       for (dest = 1; dest < num_tasks; dest++) {
-        MPI_Recv(&current, 1, MPI_DOUBLE, MPI_ANY_SOURCE, 3, MPI_COMM_WORLD, &status);
+        MPI_Recv(&current, 1, MPI_DOUBLE, dest, 3, MPI_COMM_WORLD, &status);
         soma_params[2] += current;
       }
 
@@ -213,7 +213,7 @@ void soma_runner(int num_tasks, int num_dendrs, int num_comps) {
        "Compartments: %d, Dendrites: %d, Execution time: %f s, "
        "Slave processes: %d\n",
        COMPTIME, soma_params[0], num_comps - 2, num_dendrs, exec_time,
-       num_tasks );
+       num_tasks-1 );
   fprintf( data_file, "# X Y\n");
 
   for (t_ms = 0; t_ms < COMPTIME; t_ms++) {
@@ -231,7 +231,7 @@ void soma_runner(int num_tasks, int num_dendrs, int num_comps) {
     pinfo.num_comps = num_comps - 2;
     pinfo.num_dendrs = num_dendrs;
     pinfo.exec_time = exec_time;
-    pinfo.slaves = num_tasks;
+    pinfo.slaves = num_tasks-1;
   }
 
   if (ISDEF_PLOT_PNG) {    plotData( &pinfo, data_fname, graph_fname ); }

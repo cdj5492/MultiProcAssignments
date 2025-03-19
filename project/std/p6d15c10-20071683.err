@@ -1,0 +1,2 @@
+/var/spool/slurmd/job20071683/slurm_script: line 39: SBATCH: command not found
+srun: error: Invalid numeric value "mpi_hh" for --ntasks.

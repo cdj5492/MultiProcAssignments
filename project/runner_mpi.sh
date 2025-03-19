@@ -36,7 +36,7 @@
 #SBATCH --get-user-env
 #SBATCH --mem=1G
 #SBATCH --time=0-1:0:0
-SBATCH --ntasks=11
+#SBATCH --ntasks=6
 
 #
 # Your job script goes below this line.
@@ -54,5 +54,5 @@ spack env activate cmpe-655
 # indicated by the -n option. If these do not, your results will
 # not be valid or you may have wasted resources that others could
 # have used. Using $SLURM_NPROCS guarantees a match.
-srun -n $SLURM_NPROCS mpi_hh -d 30 -c 100
+srun -n $SLURM_NPROCS mpi_hh -d 15 -c 10
 # srun -n 11 mpi_hh -d 30 -c 100
