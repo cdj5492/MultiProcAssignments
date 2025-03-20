@@ -253,40 +253,25 @@ void soma_runner(int num_tasks, int num_dendrs, int num_comps) {
  */
 void worker_runner(int rank, int num_tasks, int num_dendrs, int num_comps) {
   double current, **dendr_volt;
-  int worker_num_dendrs;
 
-  int i, j, dendrite, global_dendrite, t_ms, step; // Various indexing variables.
+  int i, j, dendrite, t_ms, step; // Various indexing variables.
 
   double worker_y_0, worker_soma_params_0, worker_soma_params_2;
 
   MPI_Status status;
-
-  // compute worker's ID (ranks 1...num_tasks-1 are workers)
-  int worker_id = rank - 1;
-
-  // compute base number and extra dendrites for uneven distribution.
-  int base = num_dendrs / (num_tasks - 1);
-  int extra = num_dendrs % (num_tasks - 1);
-
 
 
   //////////////////////////////////////////////////////////////////////////////
   // Initialize simulation parameters.
   //////////////////////////////////////////////////////////////////////////////
 
-  // global offset for this worker
-  int global_offset;
-  if (worker_id < extra)
-    global_offset = worker_id * (base + 1);
-  else
-    global_offset = extra * (base + 1) + (worker_id - extra) * base;
-
-  // Determine number of dendrites for this worker.
-  worker_num_dendrs = base + (worker_id < extra ? 1 : 0);
+  // The first compartment is a dummy and the last is connected to the soma.
+  num_comps = num_comps + 2;
 
   // Initialize the potential of each dendrite compartment to the rest voltage.
-  dendr_volt = (double**) malloc(worker_num_dendrs * sizeof(double*));
-  for (i = 0; i < worker_num_dendrs; i++) {
+  // Most entries will be unused, but the size of the malloc is fairly small.
+  dendr_volt = (double**) malloc(num_dendrs * sizeof(double*));
+  for (i = 0; i < num_dendrs; i++) {
     dendr_volt[i] = (double*) malloc( num_comps * sizeof(double) );
     for (j = 0; j < num_comps; j++) {
       dendr_volt[i][j] = VREST;
@@ -309,12 +294,12 @@ void worker_runner(int rank, int num_tasks, int num_dendrs, int num_comps) {
       worker_soma_params_2 = 0.0;
 
       // Loop over all the dendrites this worker is assigned 
-      for (dendrite = 0; dendrite < worker_num_dendrs; dendrite++) {
-        global_dendrite = global_offset + dendrite;
+      // for (dendrite = 0; dendrite < worker_num_dendrs; dendrite++) {
+      for (dendrite = rank-1; dendrite < num_dendrs; dendrite += (num_tasks-1)) {
         // This will update Vm in all compartments and will give a new injected
         // current value from last compartment into the soma.
         current = dendriteStep( dendr_volt[ dendrite ],
-                    step + global_dendrite + 1,
+                    step + dendrite + 1,
                     num_comps,
                     worker_soma_params_0,
                     worker_y_0 );
@@ -331,7 +316,7 @@ void worker_runner(int rank, int num_tasks, int num_dendrs, int num_comps) {
   // Free up allocated memory.
   //////////////////////////////////////////////////////////////////////////////
 
-  for(i = 0; i < worker_num_dendrs; i++) {
+  for(i = 0; i < num_dendrs; i++) {
     free(dendr_volt[i]);
   }
   free(dendr_volt);

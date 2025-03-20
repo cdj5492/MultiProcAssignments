@@ -10,7 +10,7 @@
 # that information here, rather than the command line.
 
 # Name of the job - You MUST use a unique name for the job
-#SBATCH -J p6d15c10
+#SBATCH -J x6d15c10
 
 # Standard out and Standard Error output files
 # Variable	Example				Description
