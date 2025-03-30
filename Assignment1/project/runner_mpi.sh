@@ -5,7 +5,7 @@
 # to the cluster.
 #
 # Typcially, the # represents a comment.However, #SBATCH is
-# interpreted by SLURM to give an option from above. As you 
+# interpreted by SLURM to give an option from above. As you
 # will see in the following lines, it is very useful to provide
 # that information here, rather than the command line.
 
@@ -29,7 +29,7 @@
 # SBATCH --mail-type=ALL
 
 # Here, we specify the partition, the number of cores to use,
-# the amount of memory we would like per core, and set a 
+# the amount of memory we would like per core, and set a
 # maximum runtime duration to avoid any hanging runs.
 #SBATCH --partition=kgcoe-mps
 #SBATCH --account=kgcoe-mps
@@ -54,5 +54,5 @@ spack env activate cmpe-655
 # indicated by the -n option. If these do not, your results will
 # not be valid or you may have wasted resources that others could
 # have used. Using $SLURM_NPROCS guarantees a match.
-srun -n $SLURM_NPROCS mpi_hh -d 1500 -c 10
+srun -n $SLURM_NPROCS mpi_hh -d 15 -c 10
 # srun -n 11 mpi_hh -d 30 -c 100
