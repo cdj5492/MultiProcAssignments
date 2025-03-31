@@ -29,7 +29,7 @@
 #SBATCH --account=kgcoe-mps
 #SBATCH --get-user-env
 # number of tasks 
-#SBATCH --ntasks=6
+#SBATCH --ntasks=2
 # maximum run duration (your peers will thank you)
 #SBATCH --time=0-1:0:0
 # maximum memory per node
@@ -57,9 +57,9 @@ spack env activate cmpe-655
 # MAKE SURE THAT YOU ONLY HAVE ONE OF THESE UNCOMMENTED AT A TIME!
 # **********************************************************************
 # Sequential
-srun -n $SLURM_NPROCS raytrace_mpi -h 100 -w 100 -c configs/twhitted.xml -p none 
+# srun -n $SLURM_NPROCS raytrace_mpi -h 100 -w 100 -c configs/twhitted.xml -p none 
 # Static Strips
-# srun -n $SLURM_NPROCS raytrace_mpi -h 100 -w 100 -c configs/twhitted.xml -p static_strips_horizontal 
+srun -n $SLURM_NPROCS raytrace_mpi -h 100 -w 100 -c configs/twhitted.xml -p static_strips_horizontal 
 # Static Cycles
 # srun -n $SLURM_NPROCS raytrace_mpi -h 100 -w 100 -c configs/twhitted.xml -p static_cycles_vertical -cs 1
 # Static Blocks

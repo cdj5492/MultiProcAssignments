@@ -28,7 +28,7 @@ void slaveMain(ConfigData* data)
             // get our pixels from the master
             MPI_Recv(pixels, numVals, MPI_FLOAT, 0, 1, MPI_COMM_WORLD, &status);
 
-            processBlock(data, pixels, data->width, stripHeight);
+            processBlock(data, pixels, 0, stripHeight * data->mpi_rank, data->width, stripHeight);
 
             // send them back
             MPI_Send(pixels, numVals, MPI_FLOAT, 0, 1, MPI_COMM_WORLD);

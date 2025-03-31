@@ -48,7 +48,7 @@ void masterMain(ConfigData* data)
 
             // send out strips to each slave
             for (int i = 0; i < data->mpi_procs; ++i) {
-                MPI_Send(&pixels[numVals * i], numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD);
+                MPI_Send(&(pixels[numVals * i]), numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD);
             }
 
             // spin up work for the master during this time
@@ -56,7 +56,7 @@ void masterMain(ConfigData* data)
 
             // Get all the data back from the slaves
             for (int i = 0; i < data->mpi_procs; ++i) {
-                MPI_Recv(&pixels[numVals * i], numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD, &status);
+                MPI_Recv(&(pixels[numVals * i]), numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD, &status);
             }
 
             stopTime = MPI_Wtime();
