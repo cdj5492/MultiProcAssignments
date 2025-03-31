@@ -5,9 +5,12 @@
 
 #include "RayTrace.h"
 #include "master.h"
+#include "slave.h"
 
 void masterMain(ConfigData* data)
 {
+    MPI_Status status;
+
     //Depending on the partitioning scheme, different things will happen.
     //You should have a different function for each of the required 
     //schemes that returns some values that you need to handle.
@@ -36,10 +39,40 @@ void masterMain(ConfigData* data)
             masterSequential(data, pixels);
             stopTime = MPI_Wtime();
             break;
-        default:
+        case PART_MODE_STATIC_STRIPS_HORIZONTAL:
+        {
             startTime = MPI_Wtime();
-            masterSequential(data, pixels);
+
+            int stripHeight = data->height / data->mpi_procs;
+            int numVals = 3 * data->width * stripHeight;
+
+            // send out strips to each slave
+            for (int i = 0; i < data->mpi_procs; ++i) {
+                MPI_Send(&pixels[numVals * i], numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD);
+            }
+
+            // spin up work for the master during this time
+            slaveMain(data);
+
+            // Get all the data back from the slaves
+            for (int i = 0; i < data->mpi_procs; ++i) {
+                MPI_Recv(&pixels[numVals * i], numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD, &status);
+            }
+
             stopTime = MPI_Wtime();
+            break;
+        }
+        case PART_MODE_STATIC_STRIPS_VERTICAL:
+            break;
+        case PART_MODE_STATIC_BLOCKS:
+            break;
+        case PART_MODE_STATIC_CYCLES_HORIZONTAL:
+            break;
+        case PART_MODE_STATIC_CYCLES_VERTICAL:
+            break;
+        case PART_MODE_DYNAMIC:
+            break;
+        default:
             break;
     }
 
