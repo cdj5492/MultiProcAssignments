@@ -6,10 +6,13 @@
 #include "RayTrace.h"
 #include "master.h"
 #include "slave.h"
+#include "blockOps.h"
 
 void masterMain(ConfigData* data)
 {
     MPI_Status status;
+    MPI_Datatype MPI_Block;
+    MPI_Datatype MPI_ComputeReport;
 
     //Depending on the partitioning scheme, different things will happen.
     //You should have a different function for each of the required 
@@ -23,14 +26,14 @@ void masterMain(ConfigData* data)
     //type.
     double renderTime = 0.0, startTime, stopTime;
 
-	//Add the required partitioning methods here in the case statement.
-	//You do not need to handle all cases; the default will catch any
-	//statements that are not specified. This switch/case statement is the
-	//only place that you should be adding code in this function. Make sure
-	//that you update the header files with the new functions that will be
-	//called.
-	//It is suggested that you use the same parameters to your functions as shown
-	//in the sequential example below.
+    //Add the required partitioning methods here in the case statement.
+    //You do not need to handle all cases; the default will catch any
+    //statements that are not specified. This switch/case statement is the
+    //only place that you should be adding code in this function. Make sure
+    //that you update the header files with the new functions that will be
+    //called.
+    //It is suggested that you use the same parameters to your functions as shown
+    //in the sequential example below.
     switch (data->partitioningMode)
     {
         case PART_MODE_NONE:
@@ -46,9 +49,20 @@ void masterMain(ConfigData* data)
             int stripHeight = data->height / data->mpi_procs;
             int numVals = 3 * data->width * stripHeight;
 
+            MPI_Block = create_block_type(data->width * stripHeight);
+            // MPI_ComputeReport = create_compute_report_type(data->mpi_procs);
+
             // send out strips to each slave
             for (int i = 0; i < data->mpi_procs; ++i) {
-                MPI_Send(&(pixels[numVals * i]), numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD);
+                Block block;
+                block.blockStartX = 0;
+                block.blockStartY = stripHeight * i;
+                block.blockWidth = data->width;
+                block.blockHeight = stripHeight;
+                block.blockData = &(pixels[numVals * i]);
+
+                MPI_Send(&block, 1, MPI_Block, i, 1, MPI_COMM_WORLD);
+                // MPI_Send(&(pixels[numVals * i]), numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD);
             }
 
             // spin up work for the master during this time

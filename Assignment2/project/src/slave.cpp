@@ -23,7 +23,11 @@ void slaveMain(ConfigData* data)
             // assumes it can divide evenly
             int stripHeight = data->height / data->mpi_procs;
             int numVals = 3 * data->width * stripHeight;
-            float* pixels = new float[numVals];
+            // float* pixels = new float[numVals];
+
+            MPI_Block = create_block_type(data->width * stripHeight);
+            
+            Block block;
 
             // get our pixels from the master
             MPI_Recv(pixels, numVals, MPI_FLOAT, 0, 1, MPI_COMM_WORLD, &status);
