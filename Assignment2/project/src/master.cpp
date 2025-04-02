@@ -11,8 +11,7 @@
 void masterMain(ConfigData* data)
 {
     MPI_Status status;
-    MPI_Datatype MPI_Block;
-    MPI_Datatype MPI_ComputeReport;
+    MPI_Datatype MPI_BlockHeader = create_block_header_type();
 
     //Depending on the partitioning scheme, different things will happen.
     //You should have a different function for each of the required 
@@ -49,34 +48,122 @@ void masterMain(ConfigData* data)
             int stripHeight = data->height / data->mpi_procs;
             int numVals = 3 * data->width * stripHeight;
 
-            MPI_Block = create_block_type(data->width * stripHeight);
-            // MPI_ComputeReport = create_compute_report_type(data->mpi_procs);
+            MPI_BlockHeader = create_block_header_type();
 
             // send out strips to each slave
-            for (int i = 0; i < data->mpi_procs; ++i) {
-                Block block;
-                block.blockStartX = 0;
-                block.blockStartY = stripHeight * i;
-                block.blockWidth = data->width;
-                block.blockHeight = stripHeight;
-                block.blockData = &(pixels[numVals * i]);
+            for (int rank = 0; rank < data->mpi_procs; ++rank) {
+                BlockHeader header;
+                header.blockStartX = 0;
+                header.blockStartY = stripHeight * rank;
+                header.blockWidth = data->width;
+                header.blockHeight = stripHeight;
 
-                MPI_Send(&block, 1, MPI_Block, i, 1, MPI_COMM_WORLD);
-                // MPI_Send(&(pixels[numVals * i]), numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD);
+                MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
             }
 
-            // spin up work for the master during this time
+            // spin up work for the master during this time using the same slave worker function
             slaveMain(data);
 
             // Get all the data back from the slaves
-            for (int i = 0; i < data->mpi_procs; ++i) {
-                MPI_Recv(&(pixels[numVals * i]), numVals, MPI_FLOAT, i, 1, MPI_COMM_WORLD, &status);
+            for (int rank = 0; rank < data->mpi_procs; ++rank) {
+                MPI_Status status;
+                MPI_Probe(rank, 2, MPI_COMM_WORLD, &status);
+                int messageSize = 0;
+                MPI_Get_count(&status, MPI_PACKED, &messageSize);
+                char* buffer = new char[messageSize];
+                MPI_Recv(buffer, messageSize, MPI_PACKED, rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                // begin unpacking
+                int position = 0;
+                double compTime;
+                int numBlocks;
+                MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE, MPI_COMM_WORLD);
+                MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
+
+                // unpack header and pixel data for each block
+                for (int i = 0; i < numBlocks; ++i) {
+                    int headerData[4];
+                    MPI_Unpack(buffer, messageSize, &position, headerData, 4, MPI_INT, MPI_COMM_WORLD);
+                    BlockHeader header;
+                    header.blockStartX = headerData[0];
+                    header.blockStartY = headerData[1];
+                    header.blockWidth = headerData[2];
+                    header.blockHeight = headerData[3];
+
+                    int numPixels = 3 * header.blockWidth * header.blockHeight;
+                    float* blockData = new float[numPixels];
+                    MPI_Unpack(buffer, messageSize, &position, blockData, numPixels, MPI_FLOAT, MPI_COMM_WORLD);
+
+                    // copy into final image
+                    cpyBlockToPixels(data, pixels, &header, blockData);
+                    delete[] blockData;
+                }
+                delete[] buffer;
             }
 
             stopTime = MPI_Wtime();
             break;
         }
         case PART_MODE_STATIC_STRIPS_VERTICAL:
+        {
+            startTime = MPI_Wtime();
+
+            int stripWidth = data->width / data->mpi_procs;
+            int numVals = 3 * data->height * stripWidth;
+
+            MPI_BlockHeader = create_block_header_type();
+
+            // send out strips to each slave
+            for (int rank = 0; rank < data->mpi_procs; ++rank) {
+                BlockHeader header;
+                header.blockStartX = stripWidth * rank;
+                header.blockStartY = 0;
+                header.blockWidth = stripWidth;
+                header.blockHeight = data->height;
+
+                MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
+            }
+
+            // spin up work for the master during this time using the same slave worker function
+            slaveMain(data);
+
+            // Get all the data back from the slaves
+            for (int rank = 0; rank < data->mpi_procs; ++rank) {
+                MPI_Status status;
+                MPI_Probe(rank, 2, MPI_COMM_WORLD, &status);
+                int messageSize = 0;
+                MPI_Get_count(&status, MPI_PACKED, &messageSize);
+                char* buffer = new char[messageSize];
+                MPI_Recv(buffer, messageSize, MPI_PACKED, rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                // begin unpacking
+                int position = 0;
+                double compTime;
+                int numBlocks;
+                MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE, MPI_COMM_WORLD);
+                MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
+
+                // unpack header and pixel data for each block
+                for (int i = 0; i < numBlocks; ++i) {
+                    int headerData[4];
+                    MPI_Unpack(buffer, messageSize, &position, headerData, 4, MPI_INT, MPI_COMM_WORLD);
+                    BlockHeader header;
+                    header.blockStartX = headerData[0];
+                    header.blockStartY = headerData[1];
+                    header.blockWidth = headerData[2];
+                    header.blockHeight = headerData[3];
+
+                    int numPixels = 3 * header.blockWidth * header.blockHeight;
+                    float* blockData = new float[numPixels];
+                    MPI_Unpack(buffer, messageSize, &position, blockData, numPixels, MPI_FLOAT, MPI_COMM_WORLD);
+
+                    // copy into final image
+                    cpyBlockToPixels(data, pixels, &header, blockData);
+                    delete[] blockData;
+                }
+                delete[] buffer;
+            }
+        }
             break;
         case PART_MODE_STATIC_BLOCKS:
             break;
