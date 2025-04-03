@@ -1,5 +1,6 @@
 //This file contains the code that the master process will execute.
 
+#include <algorithm>
 #include <iostream>
 #include <mpi.h>
 
@@ -10,7 +11,6 @@
 
 void masterMain(ConfigData* data)
 {
-    MPI_Status status;
     MPI_Datatype MPI_BlockHeader = create_block_header_type();
 
     //Depending on the partitioning scheme, different things will happen.
@@ -45,8 +45,8 @@ void masterMain(ConfigData* data)
         {
             startTime = MPI_Wtime();
 
-            int stripHeight = data->height / data->mpi_procs;
-            int numVals = 3 * data->width * stripHeight;
+            // rounded up
+            int stripHeight = (data->height + data->mpi_procs - 1) / data->mpi_procs;
 
             MPI_BlockHeader = create_block_header_type();
 
@@ -56,7 +56,7 @@ void masterMain(ConfigData* data)
                 header.blockStartX = 0;
                 header.blockStartY = stripHeight * rank;
                 header.blockWidth = data->width;
-                header.blockHeight = stripHeight;
+                header.blockHeight = std::min(stripHeight, data->height - header.blockStartY);
 
                 MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
             }
@@ -64,52 +64,16 @@ void masterMain(ConfigData* data)
             // spin up work for the master during this time using the same slave worker function
             slaveMain(data);
 
-            // Get all the data back from the slaves
-            for (int rank = 0; rank < data->mpi_procs; ++rank) {
-                MPI_Status status;
-                MPI_Probe(rank, 2, MPI_COMM_WORLD, &status);
-                int messageSize = 0;
-                MPI_Get_count(&status, MPI_PACKED, &messageSize);
-                char* buffer = new char[messageSize];
-                MPI_Recv(buffer, messageSize, MPI_PACKED, rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                // begin unpacking
-                int position = 0;
-                double compTime;
-                int numBlocks;
-                MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE, MPI_COMM_WORLD);
-                MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
-
-                // unpack header and pixel data for each block
-                for (int i = 0; i < numBlocks; ++i) {
-                    int headerData[4];
-                    MPI_Unpack(buffer, messageSize, &position, headerData, 4, MPI_INT, MPI_COMM_WORLD);
-                    BlockHeader header;
-                    header.blockStartX = headerData[0];
-                    header.blockStartY = headerData[1];
-                    header.blockWidth = headerData[2];
-                    header.blockHeight = headerData[3];
-
-                    int numPixels = 3 * header.blockWidth * header.blockHeight;
-                    float* blockData = new float[numPixels];
-                    MPI_Unpack(buffer, messageSize, &position, blockData, numPixels, MPI_FLOAT, MPI_COMM_WORLD);
-
-                    // copy into final image
-                    cpyBlockToPixels(data, pixels, &header, blockData);
-                    delete[] blockData;
-                }
-                delete[] buffer;
-            }
-
             stopTime = MPI_Wtime();
+
             break;
         }
         case PART_MODE_STATIC_STRIPS_VERTICAL:
         {
             startTime = MPI_Wtime();
 
-            int stripWidth = data->width / data->mpi_procs;
-            int numVals = 3 * data->height * stripWidth;
+            // rounded up
+            int stripWidth = (data->width + data->mpi_procs - 1) / data->mpi_procs;
 
             MPI_BlockHeader = create_block_header_type();
 
@@ -118,7 +82,7 @@ void masterMain(ConfigData* data)
                 BlockHeader header;
                 header.blockStartX = stripWidth * rank;
                 header.blockStartY = 0;
-                header.blockWidth = stripWidth;
+                header.blockWidth = std::min(stripWidth, data->width - header.blockStartX);
                 header.blockHeight = data->height;
 
                 MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
@@ -127,44 +91,8 @@ void masterMain(ConfigData* data)
             // spin up work for the master during this time using the same slave worker function
             slaveMain(data);
 
-            // Get all the data back from the slaves
-            for (int rank = 0; rank < data->mpi_procs; ++rank) {
-                MPI_Status status;
-                MPI_Probe(rank, 2, MPI_COMM_WORLD, &status);
-                int messageSize = 0;
-                MPI_Get_count(&status, MPI_PACKED, &messageSize);
-                char* buffer = new char[messageSize];
-                MPI_Recv(buffer, messageSize, MPI_PACKED, rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                // begin unpacking
-                int position = 0;
-                double compTime;
-                int numBlocks;
-                MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE, MPI_COMM_WORLD);
-                MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
-
-                // unpack header and pixel data for each block
-                for (int i = 0; i < numBlocks; ++i) {
-                    int headerData[4];
-                    MPI_Unpack(buffer, messageSize, &position, headerData, 4, MPI_INT, MPI_COMM_WORLD);
-                    BlockHeader header;
-                    header.blockStartX = headerData[0];
-                    header.blockStartY = headerData[1];
-                    header.blockWidth = headerData[2];
-                    header.blockHeight = headerData[3];
-
-                    int numPixels = 3 * header.blockWidth * header.blockHeight;
-                    float* blockData = new float[numPixels];
-                    MPI_Unpack(buffer, messageSize, &position, blockData, numPixels, MPI_FLOAT, MPI_COMM_WORLD);
-
-                    // copy into final image
-                    cpyBlockToPixels(data, pixels, &header, blockData);
-                    delete[] blockData;
-                }
-                delete[] buffer;
-            }
-        }
             break;
+        }
         case PART_MODE_STATIC_BLOCKS:
             break;
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
@@ -175,6 +103,53 @@ void masterMain(ConfigData* data)
             break;
         default:
             break;
+    }
+
+    // Get all the data back from the slaves
+    for (int rank = 0; rank < data->mpi_procs; ++rank) {
+        MPI_Status status;
+        MPI_Probe(rank, 2, MPI_COMM_WORLD, &status);
+        int messageSize = 0;
+        MPI_Get_count(&status, MPI_PACKED, &messageSize);
+        char* buffer = new char[messageSize];
+        MPI_Recv(buffer, messageSize, MPI_PACKED, rank, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        // begin unpacking
+        int position = 0;
+        double compTime;
+        int numBlocks;
+        MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE, MPI_COMM_WORLD);
+        MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
+
+        // unpack header and pixel data for each block
+        for (int i = 0; i < numBlocks; ++i) {
+            int headerData[4];
+            MPI_Unpack(buffer, messageSize, &position, headerData, 4, MPI_INT, MPI_COMM_WORLD);
+            BlockHeader header;
+            header.blockStartX = headerData[0];
+            header.blockStartY = headerData[1];
+            header.blockWidth = headerData[2];
+            header.blockHeight = headerData[3];
+
+            // print block info, including which rank it came from
+            // std::cout << "Received block from rank " << rank << ": " << header.blockStartX << ", " << header.blockStartY << ", " << header.blockWidth << ", " << header.blockHeight << std::endl;
+
+            int numPixels = 3 * header.blockWidth * header.blockHeight;
+
+            // if the block is contiguous in memory, don't use a seperate blockData buffer.
+            // Helps speed up readback if we don't need to copy here
+            if (header.blockWidth == data->width || header.blockHeight == 1) {
+                MPI_Unpack(buffer, messageSize, &position, &(pixels[3*(header.blockStartY*data->width + header.blockStartX)]), numPixels, MPI_FLOAT, MPI_COMM_WORLD);
+            } else {
+                float* blockData = new float[numPixels];
+                MPI_Unpack(buffer, messageSize, &position, blockData, numPixels, MPI_FLOAT, MPI_COMM_WORLD);
+
+                // copy into final image
+                cpyBlockToPixels(data, pixels, &header, blockData);
+                delete[] blockData;
+            }
+        }
+        delete[] buffer;
     }
 
     renderTime = stopTime - startTime;

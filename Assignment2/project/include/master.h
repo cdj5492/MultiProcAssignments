@@ -2,6 +2,7 @@
 #define __MASTER_PROCESS_H__
 
 #include "RayTrace.h"
+#include "blockOps.h"
 
 //This function is the main that only the master process
 //will run.
@@ -20,5 +21,6 @@ void masterMain( ConfigData *data );
 //
 //Outputs: None
 void masterSequential(ConfigData *data, float* pixels);
+
 
 #endif
