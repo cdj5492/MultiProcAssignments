@@ -66,23 +66,51 @@ void slaveMain(ConfigData* data)
             break;
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
         {
-            // get our block assignment from the master
-            BlockHeader header;
-            MPI_Recv(&header, 1, MPI_BlockHeader, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            // figure out how many rows we are assigned, taking into account
+            // the number of rows that are not evenly divisible by the number of processes
+            int numRows = data->height / data->mpi_procs + (data->mpi_rank % data->mpi_procs < data->height % data->mpi_procs ? 1 : 0);
 
-            // allocate pixel buffer
-            int numPixels = 3 * header.blockWidth * header.blockHeight;
-            float* pixels = new float[numPixels];
+            double totalCompTime = 0.0;
 
-            double startTime = MPI_Wtime();
-            processBlock(data, &header, pixels);
-            double stopTime = MPI_Wtime();
-            double compTime = stopTime - startTime;
+            // headers array
+            BlockHeader* headers = new BlockHeader[numRows];
+            // pixel buffers array
+            float** pixels = new float*[numRows];
 
-            sendBlocks(compTime, 1, &header, &pixels);
-            
+            for (int i = 0; i < numRows; i++) {
+                // get our block assignment from the master
+                BlockHeader header;
+                MPI_Recv(&header, 1, MPI_BlockHeader, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                // store header in array
+                headers[i].blockStartX = header.blockStartX;
+                headers[i].blockStartY = header.blockStartY;
+                headers[i].blockWidth = header.blockWidth;
+                headers[i].blockHeight = header.blockHeight;
+
+                // allocate pixel buffer
+                int numPixels = 3 * header.blockWidth * header.blockHeight;
+                float* pixelBuffer = new float[numPixels];
+
+
+                double startTime = MPI_Wtime();
+                processBlock(data, &header, pixelBuffer);
+                double stopTime = MPI_Wtime();
+                double compTime = stopTime - startTime;
+                totalCompTime += compTime;
+
+                // store pixel buffer in array
+                pixels[i] = pixelBuffer;
+            }
+
+            sendBlocks(totalCompTime, numRows, headers, pixels);
+
             // clean up
+            for (int i = 0; i < numRows; i++) {
+                delete[] pixels[i];
+            }
             delete[] pixels;
+            delete[] headers;
 
             break;
         }

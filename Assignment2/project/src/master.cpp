@@ -48,8 +48,6 @@ void masterMain(ConfigData* data)
             // rounded up
             int stripHeight = (data->height + data->mpi_procs - 1) / data->mpi_procs;
 
-            MPI_BlockHeader = create_block_header_type();
-
             // send out strips to each slave
             for (int rank = 0; rank < data->mpi_procs; ++rank) {
                 BlockHeader header;
@@ -75,8 +73,6 @@ void masterMain(ConfigData* data)
             // rounded up
             int stripWidth = (data->width + data->mpi_procs - 1) / data->mpi_procs;
 
-            MPI_BlockHeader = create_block_header_type();
-
             // send out strips to each slave
             for (int rank = 0; rank < data->mpi_procs; ++rank) {
                 BlockHeader header;
@@ -96,7 +92,24 @@ void masterMain(ConfigData* data)
         case PART_MODE_STATIC_BLOCKS:
             break;
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
+        {
+            // send out each row to a different slave
+            startTime = MPI_Wtime();
+            for (int row = 0; row < data->height; ++row) {
+                BlockHeader header;
+                header.blockStartX = 0;
+                header.blockStartY = row;
+                header.blockWidth = data->width;
+                header.blockHeight = 1;
+
+                MPI_Send(&header, 1, MPI_BlockHeader, row % data->mpi_procs, 1, MPI_COMM_WORLD);
+            }
+
+            // spin up work for the master during this time using the same slave worker function
+            slaveMain(data);
+
             break;
+        }
         case PART_MODE_STATIC_CYCLES_VERTICAL:
             break;
         case PART_MODE_DYNAMIC:
