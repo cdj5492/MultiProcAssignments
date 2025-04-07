@@ -1,6 +1,7 @@
 //This file contains the code that the master process will execute.
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <mpi.h>
 
@@ -25,6 +26,8 @@ void masterMain(ConfigData* data)
     //type.
     double renderTime = 0.0, startTime, stopTime;
 
+    startTime = MPI_Wtime();
+
     //Add the required partitioning methods here in the case statement.
     //You do not need to handle all cases; the default will catch any
     //statements that are not specified. This switch/case statement is the
@@ -37,14 +40,10 @@ void masterMain(ConfigData* data)
     {
         case PART_MODE_NONE:
             //Call the function that will handle this.
-            startTime = MPI_Wtime();
             masterSequential(data, pixels);
-            stopTime = MPI_Wtime();
             break;
         case PART_MODE_STATIC_STRIPS_HORIZONTAL:
         {
-            startTime = MPI_Wtime();
-
             // rounded up
             int stripHeight = (data->height + data->mpi_procs - 1) / data->mpi_procs;
 
@@ -54,6 +53,7 @@ void masterMain(ConfigData* data)
                 header.blockStartX = 0;
                 header.blockStartY = stripHeight * rank;
                 header.blockWidth = data->width;
+                // squish last strip to fit
                 header.blockHeight = std::min(stripHeight, data->height - header.blockStartY);
 
                 MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
@@ -61,15 +61,10 @@ void masterMain(ConfigData* data)
 
             // spin up work for the master during this time using the same slave worker function
             slaveMain(data);
-
-            stopTime = MPI_Wtime();
-
             break;
         }
         case PART_MODE_STATIC_STRIPS_VERTICAL:
         {
-            startTime = MPI_Wtime();
-
             // rounded up
             int stripWidth = (data->width + data->mpi_procs - 1) / data->mpi_procs;
 
@@ -78,6 +73,7 @@ void masterMain(ConfigData* data)
                 BlockHeader header;
                 header.blockStartX = stripWidth * rank;
                 header.blockStartY = 0;
+                // squish last strip to fit
                 header.blockWidth = std::min(stripWidth, data->width - header.blockStartX);
                 header.blockHeight = data->height;
 
@@ -86,15 +82,83 @@ void masterMain(ConfigData* data)
 
             // spin up work for the master during this time using the same slave worker function
             slaveMain(data);
-
             break;
         }
         case PART_MODE_STATIC_BLOCKS:
+        {
+            // length of one side of a block (assuming square blocks)
+            int blockSize = data->width / ((int)std::sqrt(data->mpi_procs));
+
+            // how many whole number blocks can we fit in x and y
+            int numBlocksX = data->width / blockSize;
+            int numBlocksY = data->height / blockSize;
+            // how many pixels are left over in x and y
+            int leftoverX = data->width % blockSize;
+            int leftoverY = data->height % blockSize;
+
+            int assignRank = 0;
+
+            for (int y = 0; y < numBlocksY; ++y) {
+                for (int x = 0; x < numBlocksX; ++x) {
+                    BlockHeader header;
+                    header.blockStartX = x * blockSize;
+                    header.blockStartY = y * blockSize;
+                    header.blockWidth = blockSize;
+                    header.blockHeight = blockSize;
+
+                    // send out full blocks to each slave
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
+
+                    assignRank = (assignRank + 1) % data->mpi_procs;
+                }
+            }
+
+            // send out leftover blocks to each slave
+            if (leftoverX > 0) {
+                for (int y = 0; y < numBlocksY; ++y) {
+                    BlockHeader header;
+                    header.blockStartX = numBlocksX * blockSize;
+                    header.blockStartY = y * blockSize;
+                    header.blockWidth = leftoverX;
+                    header.blockHeight = blockSize;
+
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
+
+                    assignRank = (assignRank + 1) % data->mpi_procs;
+                }
+            }
+            if (leftoverY > 0) {
+                for (int x = 0; x < numBlocksX; ++x) {
+                    BlockHeader header;
+                    header.blockStartX = x * blockSize;
+                    header.blockStartY = numBlocksY * blockSize;
+                    header.blockWidth = blockSize;
+                    header.blockHeight = leftoverY;
+
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
+
+                    assignRank = (assignRank + 1) % data->mpi_procs;
+                }
+            }
+
+            // send out the last corner block to each slave
+            if (leftoverX > 0 && leftoverY > 0) {
+                BlockHeader header;
+                header.blockStartX = numBlocksX * blockSize;
+                header.blockStartY = numBlocksY * blockSize;
+                header.blockWidth = leftoverX;
+                header.blockHeight = leftoverY;
+
+                MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
+            }
+
+            // spin up work for the master during this time using the same slave worker function
+            slaveMain(data);
             break;
+        }
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
         {
             // send out each row to a different slave
-            startTime = MPI_Wtime();
             for (int row = 0; row < data->height; ++row) {
                 BlockHeader header;
                 header.blockStartX = 0;
@@ -107,7 +171,6 @@ void masterMain(ConfigData* data)
 
             // spin up work for the master during this time using the same slave worker function
             slaveMain(data);
-
             break;
         }
         case PART_MODE_STATIC_CYCLES_VERTICAL:
@@ -117,6 +180,10 @@ void masterMain(ConfigData* data)
         default:
             break;
     }
+
+    stopTime = MPI_Wtime();
+
+    int largestCompTime = 0;
 
     // Get all the data back from the slaves
     for (int rank = 0; rank < data->mpi_procs; ++rank) {
@@ -133,6 +200,10 @@ void masterMain(ConfigData* data)
         int numBlocks;
         MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE, MPI_COMM_WORLD);
         MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
+
+        if (compTime > largestCompTime) {
+            largestCompTime = compTime;
+        }
 
         // unpack header and pixel data for each block
         for (int i = 0; i < numBlocks; ++i) {
@@ -166,7 +237,14 @@ void masterMain(ConfigData* data)
     }
 
     renderTime = stopTime - startTime;
-    std::cout << "Execution Time: " << renderTime << " seconds" << std::endl << std::endl;
+    std::cout << "Total execution Time: " << renderTime << " seconds" << std::endl << std::endl;
+
+    std::cout << "Largest computation time: " << largestCompTime << " seconds" << std::endl;
+
+    double communicationTime = renderTime - largestCompTime;
+    std::cout << "Total Communication Time: " << communicationTime << " seconds" << std::endl;
+    double c2cRatio = communicationTime / largestCompTime;
+    std::cout << "C-to-C Ratio: " << c2cRatio << std::endl;
 
     //After this gets done, save the image.
     std::cout << "Image will be save to: ";

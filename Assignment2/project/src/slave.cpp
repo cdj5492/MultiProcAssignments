@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <mpi.h>
+#include <cmath>
 #include "RayTrace.h"
 #include "slave.h"
 #include "blockOps.h"
@@ -10,119 +11,94 @@ void slaveMain(ConfigData* data)
 {
     MPI_Datatype MPI_BlockHeader = create_block_header_type();
 
-    //Depending on the partitioning scheme, different things will happen.
-    //You should have a different function for each of the required 
-    //schemes that returns some values that you need to handle.
+    // should be calculated based on the partitioning scheme
+    int numBlocks = 0;
+
+    // Just calculates how many blocks the slave will be processing up front
     switch (data->partitioningMode)
     {
         case PART_MODE_NONE:
             //The slave will do nothing since this means sequential operation.
             break;
         case PART_MODE_STATIC_STRIPS_HORIZONTAL:
-        {
-            // get our block assignment from the master
-            BlockHeader header;
-            MPI_Recv(&header, 1, MPI_BlockHeader, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-            // allocate pixel buffer
-            int numPixels = 3 * header.blockWidth * header.blockHeight;
-            float* pixels = new float[numPixels];
-
-            double startTime = MPI_Wtime();
-            processBlock(data, &header, pixels);
-            double stopTime = MPI_Wtime();
-            double compTime = stopTime - startTime;
-
-            sendBlocks(compTime, 1, &header, &pixels);
-            
-            // clean up
-            delete[] pixels;
-
+            numBlocks = 1;
             break;
-        }
         case PART_MODE_STATIC_STRIPS_VERTICAL:
+            numBlocks = 1;
+            break;
+        case PART_MODE_STATIC_BLOCKS:
         {
-            // get our block assignment from the master
-            BlockHeader header;
-            MPI_Recv(&header, 1, MPI_BlockHeader, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-            // allocate pixel buffer
-            int numPixels = 3 * header.blockWidth * header.blockHeight;
-            float* pixels = new float[numPixels];
-
-            double startTime = MPI_Wtime();
-            processBlock(data, &header, pixels);
-            double stopTime = MPI_Wtime();
-            double compTime = stopTime - startTime;
-
-            sendBlocks(compTime, 1, &header, &pixels);
-            
-            // clean up
-            delete[] pixels;
-
+            int blockSize = data->width / ((int)std::sqrt(data->mpi_procs));
+            int numBlocksX = data->width / blockSize;
+            int numBlocksY = data->height / blockSize;
+            int leftoverX = data->width % blockSize;
+            int leftoverY = data->height % blockSize;
+            int totalBlocks = numBlocksX * numBlocksY 
+                            + (leftoverX > 0 ? numBlocksY : 0)
+                            + (leftoverY > 0 ? numBlocksX : 0)
+                            + ((leftoverX > 0 && leftoverY > 0) ? 1 : 0);
+            numBlocks = totalBlocks / data->mpi_procs + (data->mpi_rank < (totalBlocks % data->mpi_procs) ? 1 : 0);
             break;
         }
-        case PART_MODE_STATIC_BLOCKS:
-            break;
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
-        {
             // figure out how many rows we are assigned, taking into account
             // the number of rows that are not evenly divisible by the number of processes
-            int numRows = data->height / data->mpi_procs + (data->mpi_rank % data->mpi_procs < data->height % data->mpi_procs ? 1 : 0);
-
-            double totalCompTime = 0.0;
-
-            // headers array
-            BlockHeader* headers = new BlockHeader[numRows];
-            // pixel buffers array
-            float** pixels = new float*[numRows];
-
-            for (int i = 0; i < numRows; i++) {
-                // get our block assignment from the master
-                BlockHeader header;
-                MPI_Recv(&header, 1, MPI_BlockHeader, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                // store header in array
-                headers[i].blockStartX = header.blockStartX;
-                headers[i].blockStartY = header.blockStartY;
-                headers[i].blockWidth = header.blockWidth;
-                headers[i].blockHeight = header.blockHeight;
-
-                // allocate pixel buffer
-                int numPixels = 3 * header.blockWidth * header.blockHeight;
-                float* pixelBuffer = new float[numPixels];
-
-
-                double startTime = MPI_Wtime();
-                processBlock(data, &header, pixelBuffer);
-                double stopTime = MPI_Wtime();
-                double compTime = stopTime - startTime;
-                totalCompTime += compTime;
-
-                // store pixel buffer in array
-                pixels[i] = pixelBuffer;
-            }
-
-            sendBlocks(totalCompTime, numRows, headers, pixels);
-
-            // clean up
-            for (int i = 0; i < numRows; i++) {
-                delete[] pixels[i];
-            }
-            delete[] pixels;
-            delete[] headers;
-
+            numBlocks = data->height / data->mpi_procs + (data->mpi_rank % data->mpi_procs < data->height % data->mpi_procs ? 1 : 0);
             break;
-        }
         case PART_MODE_STATIC_CYCLES_VERTICAL:
+            // figure out how many columns we are assigned, taking into account
+            // the number of columns that are not evenly divisible by the number of processes
+            numBlocks = data->width / data->mpi_procs + (data->mpi_rank % data->mpi_procs < data->width % data->mpi_procs ? 1 : 0);
             break;
-        case PART_MODE_DYNAMIC:
-            break;
+        // case PART_MODE_DYNAMIC:
+        //     break;
         default:
             std::cout << "This mode (" << data->partitioningMode;
             std::cout << ") is not currently implemented." << std::endl;
             break;
     }
+
+    double totalCompTime = 0.0;
+
+    // headers array
+    BlockHeader* headers = new BlockHeader[numBlocks];
+    // pixel buffers array
+    float** pixels = new float*[numBlocks];
+
+    for (int i = 0; i < numBlocks; i++) {
+        // get our block assignment from the master
+        BlockHeader header;
+        MPI_Recv(&header, 1, MPI_BlockHeader, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        // store header in array
+        headers[i].blockStartX = header.blockStartX;
+        headers[i].blockStartY = header.blockStartY;
+        headers[i].blockWidth = header.blockWidth;
+        headers[i].blockHeight = header.blockHeight;
+
+        // allocate pixel buffer
+        int numPixels = 3 * header.blockWidth * header.blockHeight;
+        float* pixelBuffer = new float[numPixels];
+
+
+        double startTime = MPI_Wtime();
+        processBlock(data, &header, pixelBuffer);
+        double stopTime = MPI_Wtime();
+        double compTime = stopTime - startTime;
+        totalCompTime += compTime;
+
+        // store pixel buffer in array
+        pixels[i] = pixelBuffer;
+    }
+
+    sendBlocks(totalCompTime, numBlocks, headers, pixels);
+
+    // clean up
+    for (int i = 0; i < numBlocks; i++) {
+        delete[] pixels[i];
+    }
+    delete[] pixels;
+    delete[] headers;
 }
 
 
