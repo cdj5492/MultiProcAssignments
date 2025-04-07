@@ -174,6 +174,17 @@ void masterMain(ConfigData* data)
             break;
         }
         case PART_MODE_STATIC_CYCLES_VERTICAL:
+            // send out each column to a different slave
+            for (int column = 0; column < data->height; ++column) {
+                BlockHeader header;
+                header.blockStartX = column;
+                header.blockStartY = 0;
+                header.blockWidth = 1;
+                header.blockHeight = data->height;
+
+                MPI_Send(&header, 1, MPI_BlockHeader, column % data->mpi_procs, 1, MPI_COMM_WORLD);
+            }
+
             break;
         case PART_MODE_DYNAMIC:
             break;
