@@ -50,8 +50,21 @@ void slaveMain(ConfigData* data)
             // the number of columns that are not evenly divisible by the number of processes
             numBlocks = data->width / data->mpi_procs + (data->mpi_rank % data->mpi_procs < data->width % data->mpi_procs ? 1 : 0);
             break;
-        // case PART_MODE_DYNAMIC:
-        //     break;
+        case PART_MODE_DYNAMIC:
+        {
+            int numBlocksX = data->width / data->dynamicBlockWidth;
+            int numBlocksY = data->height / data->dynamicBlockHeight;
+            int leftoverX = data->width % data->dynamicBlockWidth;
+            int leftoverY = data->height % data->dynamicBlockHeight;
+            int totalBlocks = numBlocksX * numBlocksY
+                            + (leftoverX > 0 ? numBlocksY : 0)
+                            + (leftoverY > 0 ? numBlocksX : 0)
+                            + ((leftoverX > 0 && leftoverY > 0) ? 1 : 0);
+            int workerCount = data->mpi_procs - 1;  // workers are ranks 1..mpi_procs-1
+            int workerID = data->mpi_rank - 1;      // adjust since rank 0 is master
+            numBlocks = totalBlocks / workerCount + (workerID < (totalBlocks % workerCount) ? 1 : 0);
+            break;
+        }
         default:
             std::cout << "This mode (" << data->partitioningMode;
             std::cout << ") is not currently implemented." << std::endl;

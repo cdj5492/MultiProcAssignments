@@ -13,10 +13,6 @@
 void masterMain(ConfigData* data)
 {
     MPI_Datatype MPI_BlockHeader = create_block_header_type();
-
-    //Depending on the partitioning scheme, different things will happen.
-    //You should have a different function for each of the required 
-    //schemes that returns some values that you need to handle.
     
     //Allocate space for the image on the master.
     float* pixels = new float[3 * data->width * data->height];
@@ -86,7 +82,7 @@ void masterMain(ConfigData* data)
         }
         case PART_MODE_STATIC_BLOCKS:
         {
-            // length of one side of a block (assuming square blocks)
+            // length of one side of a block (square blocks)
             int blockSize = data->width / ((int)std::sqrt(data->mpi_procs));
 
             // how many whole number blocks can we fit in x and y
@@ -185,16 +181,83 @@ void masterMain(ConfigData* data)
                 MPI_Send(&header, 1, MPI_BlockHeader, column % data->mpi_procs, 1, MPI_COMM_WORLD);
             }
 
+            // spin up work for the master during this time using the same slave worker function
+            slaveMain(data);
+
             break;
         case PART_MODE_DYNAMIC:
+        {
+            // how many whole number blocks can we fit in x and y
+            int numBlocksX = data->width / data->dynamicBlockWidth;
+            int numBlocksY = data->height / data->dynamicBlockHeight;
+            // how many pixels are left over in x and y
+            int leftoverX = data->width % data->dynamicBlockWidth;
+            int leftoverY = data->height % data->dynamicBlockHeight;
+
+            int assignRank = 0;
+
+            for (int y = 0; y < numBlocksY; ++y) {
+                for (int x = 0; x < numBlocksX; ++x) {
+                    BlockHeader header;
+                    header.blockStartX = x * data->dynamicBlockWidth;
+                    header.blockStartY = y * data->dynamicBlockHeight;
+                    header.blockWidth = data->dynamicBlockWidth;
+                    header.blockHeight = data->dynamicBlockHeight;
+
+                    // send out full blocks to each slave
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank+1, 1, MPI_COMM_WORLD);
+
+                    assignRank = (assignRank + 1) % (data->mpi_procs - 1);
+                }
+            }
+
+            // send out leftover blocks to each slave
+            if (leftoverX > 0) {
+                for (int y = 0; y < numBlocksY; ++y) {
+                    BlockHeader header;
+                    header.blockStartX = numBlocksX * data->dynamicBlockWidth;
+                    header.blockStartY = y * data->dynamicBlockHeight;
+                    header.blockWidth = leftoverX;
+                    header.blockHeight = data->dynamicBlockHeight;
+
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank+1, 1, MPI_COMM_WORLD);
+
+                    assignRank = (assignRank + 1) % (data->mpi_procs - 1);
+                }
+            }
+            if (leftoverY > 0) {
+                for (int x = 0; x < numBlocksX; ++x) {
+                    BlockHeader header;
+                    header.blockStartX = x * data->dynamicBlockWidth;
+                    header.blockStartY = numBlocksY * data->dynamicBlockHeight;
+                    header.blockWidth = data->dynamicBlockWidth;
+                    header.blockHeight = leftoverY;
+
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank+1, 1, MPI_COMM_WORLD);
+
+                    assignRank = (assignRank + 1) % (data->mpi_procs - 1);
+                }
+            }
+
+            // send out the last corner block to each slave
+            if (leftoverX > 0 && leftoverY > 0) {
+                BlockHeader header;
+                header.blockStartX = numBlocksX * data->dynamicBlockWidth;
+                header.blockStartY = numBlocksY * data->dynamicBlockHeight;
+                header.blockWidth = leftoverX;
+                header.blockHeight = leftoverY;
+
+                MPI_Send(&header, 1, MPI_BlockHeader, assignRank+1, 1, MPI_COMM_WORLD);
+            }
+
+            // don't run anything else on the master
             break;
+        }
         default:
             break;
     }
 
-    stopTime = MPI_Wtime();
-
-    int largestCompTime = 0;
+    double largestCompTime = 0;
 
     // Get all the data back from the slaves
     for (int rank = 0; rank < data->mpi_procs; ++rank) {
@@ -211,6 +274,9 @@ void masterMain(ConfigData* data)
         int numBlocks;
         MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE, MPI_COMM_WORLD);
         MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
+
+        // for debug, just print out the compTime
+        // std::cout << "Rank " << rank << " computation time: " << compTime << std::endl;
 
         if (compTime > largestCompTime) {
             largestCompTime = compTime;
@@ -247,7 +313,10 @@ void masterMain(ConfigData* data)
         delete[] buffer;
     }
 
+    stopTime = MPI_Wtime();
     renderTime = stopTime - startTime;
+
+
     std::cout << "Total execution Time: " << renderTime << " seconds" << std::endl << std::endl;
 
     std::cout << "Largest computation time: " << largestCompTime << " seconds" << std::endl;
