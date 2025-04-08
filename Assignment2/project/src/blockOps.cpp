@@ -1,5 +1,6 @@
 #include "blockOps.h"
 #include <cstring>
+#include <iostream>
 
 void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
     for( int i = 0; i < header->blockHeight; ++i ) {
@@ -10,8 +11,11 @@ void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
             //Calculate the index into the array.
             int baseIndex = 3 * ( row * header->blockWidth + column );
 
+            // std::cout << "Rank " << data->mpi_rank << " processing global pixel (" << column+header->blockStartX << ", " << row+header->blockStartY 
+            //     << ") in block (" << header->blockStartX << ", " << header->blockStartY << ")" << std::endl;
+
             //Call the function to shade the pixel.
-            shadePixel(&(blockData[baseIndex]),row + header->blockStartY,column + header->blockStartX,data);
+            shadePixel(&(blockData[baseIndex]), row + header->blockStartY, column + header->blockStartX,data);
         }
     }
 }
