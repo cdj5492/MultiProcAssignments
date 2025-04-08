@@ -82,8 +82,25 @@ void masterMain(ConfigData* data)
         }
         case PART_MODE_STATIC_BLOCKS:
         {
-            // length of one side of a block (square blocks)
-            int blockSize = data->width / ((int)std::sqrt(data->mpi_procs));
+            // length of one side of a block, rounding up (square blocks)
+            int blockSize;
+            int s = std::floor(std::sqrt(data->mpi_procs));
+            if (data->width < data->height) {
+                if (s*s + s >= data->mpi_procs) {
+                    blockSize = data->width / s;
+                } else {
+                    blockSize = data->width / (s + 1);
+                }
+            } else if (data->width > data->height) {
+                if (s*s + s >= data->mpi_procs) {
+                    blockSize = data->height / s;
+                } else {
+                    blockSize = data->height / (s + 1);
+                }
+            } else {
+                blockSize = data->width / (std::ceil(std::sqrt(data->mpi_procs)));
+            }
+
 
             // how many whole number blocks can we fit in x and y
             int numBlocksX = data->width / blockSize;
@@ -155,14 +172,14 @@ void masterMain(ConfigData* data)
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
         {
             // send out each row to a different slave
-            for (int row = 0; row < data->height; ++row) {
+            for (int row = 0; row < data->height; row += data->cycleSize) {
                 BlockHeader header;
                 header.blockStartX = 0;
                 header.blockStartY = row;
                 header.blockWidth = data->width;
-                header.blockHeight = 1;
+                header.blockHeight = std::min(data->cycleSize, data->height - row);
 
-                MPI_Send(&header, 1, MPI_BlockHeader, row % data->mpi_procs, 1, MPI_COMM_WORLD);
+                MPI_Send(&header, 1, MPI_BlockHeader, (row / data->cycleSize) % data->mpi_procs, 1, MPI_COMM_WORLD);
             }
 
             // spin up work for the master during this time using the same slave worker function
@@ -171,14 +188,14 @@ void masterMain(ConfigData* data)
         }
         case PART_MODE_STATIC_CYCLES_VERTICAL:
             // send out each column to a different slave
-            for (int column = 0; column < data->height; ++column) {
+            for (int column = 0; column < data->height; column += data->cycleSize) {
                 BlockHeader header;
                 header.blockStartX = column;
                 header.blockStartY = 0;
-                header.blockWidth = 1;
+                header.blockWidth = std::min(data->cycleSize, data->width - column);
                 header.blockHeight = data->height;
 
-                MPI_Send(&header, 1, MPI_BlockHeader, column % data->mpi_procs, 1, MPI_COMM_WORLD);
+                MPI_Send(&header, 1, MPI_BlockHeader, (column / data->cycleSize) % data->mpi_procs, 1, MPI_COMM_WORLD);
             }
 
             // spin up work for the master during this time using the same slave worker function
@@ -317,12 +334,12 @@ void masterMain(ConfigData* data)
     renderTime = stopTime - startTime;
 
 
-    std::cout << "Total execution Time: " << renderTime << " seconds" << std::endl << std::endl;
+    std::cout << "Total execution time: " << renderTime << " seconds" << std::endl << std::endl;
 
     std::cout << "Largest computation time: " << largestCompTime << " seconds" << std::endl;
 
     double communicationTime = renderTime - largestCompTime;
-    std::cout << "Total Communication Time: " << communicationTime << " seconds" << std::endl;
+    std::cout << "Total communication time: " << communicationTime << " seconds" << std::endl;
     double c2cRatio = communicationTime / largestCompTime;
     std::cout << "C-to-C Ratio: " << c2cRatio << std::endl;
 

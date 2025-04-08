@@ -2,7 +2,7 @@
 #include <cstring>
 #include <iostream>
 
-void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
+void processBlock(ConfigData* data, BlockHeader* header, float* blockData, bool debugColoring) {
     for( int i = 0; i < header->blockHeight; ++i ) {
         for( int j = 0; j < header->blockWidth; ++j ) {
             int row = i;
@@ -14,8 +14,36 @@ void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
             // std::cout << "Rank " << data->mpi_rank << " processing global pixel (" << column+header->blockStartX << ", " << row+header->blockStartY 
             //     << ") in block (" << header->blockStartX << ", " << header->blockStartY << ")" << std::endl;
 
-            //Call the function to shade the pixel.
-            shadePixel(&(blockData[baseIndex]), row + header->blockStartY, column + header->blockStartX,data);
+            if (debugColoring) {
+                // color based on which rank it is (hsv coloring)
+                float hue = (float)data->mpi_rank / (float)data->mpi_procs;
+                float saturation = 1.0f;
+                float value = 1.0f;
+                float r, g, b;
+                // HSV to RGB conversion
+                float h = hue * 6.0f;
+                int i = (int)h;
+                float f = h - i;
+                float p = value * (1.0f - saturation);
+                float q = value * (1.0f - saturation * f);
+                float t = value * (1.0f - saturation * (1.0f - f));
+
+                switch (i % 6) {
+                    case 0: r = value; g = t;     b = p;     break;
+                    case 1: r = q;     g = value; b = p;     break;
+                    case 2: r = p;     g = value; b = t;     break;
+                    case 3: r = p;     g = q;     b = value; break;
+                    case 4: r = t;     g = p;     b = value; break;
+                    case 5: r = value; g = p;     b = q;     break;
+                }
+
+                blockData[baseIndex] = r;
+                blockData[baseIndex + 1] = g;
+                blockData[baseIndex + 2] = b;
+            } else {
+                // raytrace the pixel
+                shadePixel(&(blockData[baseIndex]), row + header->blockStartY, column + header->blockStartX,data);
+            }
         }
     }
 }

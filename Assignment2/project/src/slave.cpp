@@ -28,7 +28,23 @@ void slaveMain(ConfigData* data)
             break;
         case PART_MODE_STATIC_BLOCKS:
         {
-            int blockSize = data->width / ((int)std::sqrt(data->mpi_procs));
+            int blockSize;
+            int s = std::floor(std::sqrt(data->mpi_procs));
+            if (data->width < data->height) {
+                if (s*s + s >= data->mpi_procs) {
+                    blockSize = data->width / s;
+                } else {
+                    blockSize = data->width / (s + 1);
+                }
+            } else if (data->width > data->height) {
+                if (s*s + s >= data->mpi_procs) {
+                    blockSize = data->height / s;
+                } else {
+                    blockSize = data->height / (s + 1);
+                }
+            } else {
+                blockSize = data->width / (std::ceil(std::sqrt(data->mpi_procs)));
+            }
             int numBlocksX = data->width / blockSize;
             int numBlocksY = data->height / blockSize;
             int leftoverX = data->width % blockSize;
@@ -41,15 +57,21 @@ void slaveMain(ConfigData* data)
             break;
         }
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
+        {
             // figure out how many rows we are assigned, taking into account
             // the number of rows that are not evenly divisible by the number of processes
-            numBlocks = data->height / data->mpi_procs + (data->mpi_rank % data->mpi_procs < data->height % data->mpi_procs ? 1 : 0);
+            int blockCount = (data->height + data->cycleSize - 1) / data->cycleSize;
+            numBlocks = blockCount / data->mpi_procs + (data->mpi_rank < blockCount % data->mpi_procs ? 1 : 0);
             break;
+        }
         case PART_MODE_STATIC_CYCLES_VERTICAL:
+        {
             // figure out how many columns we are assigned, taking into account
             // the number of columns that are not evenly divisible by the number of processes
-            numBlocks = data->width / data->mpi_procs + (data->mpi_rank % data->mpi_procs < data->width % data->mpi_procs ? 1 : 0);
+            int blockCount = (data->width + data->cycleSize - 1) / data->cycleSize;
+            numBlocks = blockCount / data->mpi_procs + (data->mpi_rank < blockCount % data->mpi_procs ? 1 : 0);
             break;
+        }
         case PART_MODE_DYNAMIC:
         {
             int numBlocksX = data->width / data->dynamicBlockWidth;
@@ -95,7 +117,7 @@ void slaveMain(ConfigData* data)
 
 
         double startTime = MPI_Wtime();
-        processBlock(data, &header, pixelBuffer);
+        processBlock(data, &header, pixelBuffer, true);
         double stopTime = MPI_Wtime();
         double compTime = stopTime - startTime;
         totalCompTime += compTime;
