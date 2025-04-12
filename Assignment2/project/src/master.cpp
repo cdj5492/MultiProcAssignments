@@ -29,8 +29,8 @@ double receiveAndProcessOne(ConfigData *data, float *pixels, int rank, MPI_Statu
             MPI_COMM_WORLD);
 
     // for debug, just print out the compTime
-    // std::cout << "Rank " << rank << " computation time: " << compTime <<
-    // std::endl;
+    std::cout << "Rank " << rank << " computation time: " << compTime <<
+    std::endl;
 
     // unpack header and pixel data for each block
     for (int i = 0; i < numBlocks; ++i) {
@@ -44,9 +44,9 @@ double receiveAndProcessOne(ConfigData *data, float *pixels, int rank, MPI_Statu
         header.blockHeight = headerData[3];
 
         // print block info, including which rank it came from
-        // std::cout << "Received block from rank " << rank << ": " <<
-        // header.blockStartX << ", " << header.blockStartY << ", " <<
-        // header.blockWidth << ", " << header.blockHeight << std::endl;
+        std::cout << "Received block from rank " << rank << ": " <<
+        header.blockStartX << ", " << header.blockStartY << ", " <<
+        header.blockWidth << ", " << header.blockHeight << std::endl;
 
         int numPixels = 3 * header.blockWidth * header.blockHeight;
 
@@ -370,6 +370,7 @@ void masterMain(ConfigData *data) {
                 BlockHeader header = blockQueue.front();
                 blockQueue.pop();
                 while (processQueue.empty()) {
+                    std::cout << "Rank " << data->mpi_rank << " waiting for a block" << std::endl;
                     double compTime = receiveAndProcessOne(data, pixels, MPI_ANY_SOURCE, &status);
                     if (compTime > largestCompTime) {
                         largestCompTime = compTime;

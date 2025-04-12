@@ -15,7 +15,7 @@ typedef struct {
 
 MPI_Datatype create_block_header_type();
 
-void processBlock(ConfigData* data, BlockHeader* header, float* blockData, bool debugColoring);
+void processBlock(ConfigData* data, BlockHeader* header, float* blockData);
 
 void cpyBlockToPixels(ConfigData* data, float* pixels, BlockHeader* header, float* blockData);
 void cpyPixelsToBlock(ConfigData* data, float* pixels, BlockHeader* header, float* blockData);

@@ -33,7 +33,7 @@ void processStaticBlocks(ConfigData* data, int numBlocks) {
 
 
         double startTime = MPI_Wtime();
-        processBlock(data, &header, pixelBuffer, false);
+        processBlock(data, &header, pixelBuffer);
         double stopTime = MPI_Wtime();
         double compTime = stopTime - startTime;
         totalCompTime += compTime;
@@ -60,12 +60,7 @@ void processDynamicBlocks(ConfigData* data) {
     MPI_Status status;
     double totalCompTime = 0.0;
 
-    // headers array
-    BlockHeader* headers = new BlockHeader[data->mpi_procs];
-    // pixel buffers array
-    float** pixels = new float*[data->mpi_procs];
-
-    for (int i = 0; i < data->mpi_procs; i++) {
+    while (true) {
         // get our block assignment from the master
         BlockHeader header;
         MPI_Recv(&header, 1, MPI_BlockHeader, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
@@ -73,34 +68,32 @@ void processDynamicBlocks(ConfigData* data) {
             // we are done
             break;
         }
-        // store header in array
-        headers[i].blockStartX = header.blockStartX;
-        headers[i].blockStartY = header.blockStartY;
-        headers[i].blockWidth = header.blockWidth;
-        headers[i].blockHeight = header.blockHeight;
+
+        std::cout << "Rank " << data->mpi_rank << " received block assignment: "
+                << header.blockStartX << ", " << header.blockStartY << ", "
+                << header.blockWidth << ", " << header.blockHeight << std::endl;
 
         // allocate pixel buffer
         int numPixels = 3 * header.blockWidth * header.blockHeight;
         float* pixelBuffer = new float[numPixels];
 
         double startTime = MPI_Wtime();
-        processBlock(data, &header, pixelBuffer, false);
+        processBlock(data, &header, pixelBuffer);
         double stopTime = MPI_Wtime();
         double compTime = stopTime - startTime;
         totalCompTime += compTime;
 
-        // store pixel buffer in array
-        pixels[i] = pixelBuffer;
-    }
+        std::cout << "Rank " << data->mpi_rank << " finished processing block: "
+                << header.blockStartX << ", " << header.blockStartY << ", "
+                << header.blockWidth << ", " << header.blockHeight
+                << " in " << compTime << " seconds" << std::endl;
 
-    sendBlocks(totalCompTime, data->mpi_procs, headers, pixels);
 
-    // clean up
-    for (int i = 0; i < data->mpi_procs; i++) {
-        delete[] pixels[i];
+        sendBlocks(totalCompTime, 1, &header, &pixelBuffer);
+
+        // clean up
+        delete[] pixelBuffer;
     }
-    delete[] pixels;
-    delete[] headers;
 }
 
 void slaveMain(ConfigData* data) {
