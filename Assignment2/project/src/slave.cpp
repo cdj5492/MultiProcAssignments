@@ -7,10 +7,103 @@
 #include "slave.h"
 #include "blockOps.h"
 
-void slaveMain(ConfigData* data)
-{
+void processStaticBlocks(ConfigData* data, int numBlocks) {
     MPI_Datatype MPI_BlockHeader = create_block_header_type();
+    double totalCompTime = 0.0;
 
+    // headers array
+    BlockHeader* headers = new BlockHeader[numBlocks];
+    // pixel buffers array
+    float** pixels = new float*[numBlocks];
+
+    for (int i = 0; i < numBlocks; i++) {
+        // get our block assignment from the master
+        BlockHeader header;
+        MPI_Recv(&header, 1, MPI_BlockHeader, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+        // store header in array
+        headers[i].blockStartX = header.blockStartX;
+        headers[i].blockStartY = header.blockStartY;
+        headers[i].blockWidth = header.blockWidth;
+        headers[i].blockHeight = header.blockHeight;
+
+        // allocate pixel buffer
+        int numPixels = 3 * header.blockWidth * header.blockHeight;
+        float* pixelBuffer = new float[numPixels];
+
+
+        double startTime = MPI_Wtime();
+        processBlock(data, &header, pixelBuffer, false);
+        double stopTime = MPI_Wtime();
+        double compTime = stopTime - startTime;
+        totalCompTime += compTime;
+
+        // store pixel buffer in array
+        pixels[i] = pixelBuffer;
+    }
+
+    sendBlocks(totalCompTime, numBlocks, headers, pixels);
+
+    // clean up
+    for (int i = 0; i < numBlocks; i++) {
+        delete[] pixels[i];
+    }
+    delete[] pixels;
+    delete[] headers;
+}
+
+void processDynamicBlocks(ConfigData* data) {
+    // same exact code, but instead of knowing how many blocks we are going to do, we run until 
+    // we get a message with tag 3 from the master
+
+    MPI_Datatype MPI_BlockHeader = create_block_header_type();
+    MPI_Status status;
+    double totalCompTime = 0.0;
+
+    // headers array
+    BlockHeader* headers = new BlockHeader[data->mpi_procs];
+    // pixel buffers array
+    float** pixels = new float*[data->mpi_procs];
+
+    for (int i = 0; i < data->mpi_procs; i++) {
+        // get our block assignment from the master
+        BlockHeader header;
+        MPI_Recv(&header, 1, MPI_BlockHeader, 0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+        if (status.MPI_TAG == 3) {
+            // we are done
+            break;
+        }
+        // store header in array
+        headers[i].blockStartX = header.blockStartX;
+        headers[i].blockStartY = header.blockStartY;
+        headers[i].blockWidth = header.blockWidth;
+        headers[i].blockHeight = header.blockHeight;
+
+        // allocate pixel buffer
+        int numPixels = 3 * header.blockWidth * header.blockHeight;
+        float* pixelBuffer = new float[numPixels];
+
+        double startTime = MPI_Wtime();
+        processBlock(data, &header, pixelBuffer, false);
+        double stopTime = MPI_Wtime();
+        double compTime = stopTime - startTime;
+        totalCompTime += compTime;
+
+        // store pixel buffer in array
+        pixels[i] = pixelBuffer;
+    }
+
+    sendBlocks(totalCompTime, data->mpi_procs, headers, pixels);
+
+    // clean up
+    for (int i = 0; i < data->mpi_procs; i++) {
+        delete[] pixels[i];
+    }
+    delete[] pixels;
+    delete[] headers;
+}
+
+void slaveMain(ConfigData* data) {
     // should be calculated based on the partitioning scheme
     int numBlocks = 0;
 
@@ -22,9 +115,11 @@ void slaveMain(ConfigData* data)
             break;
         case PART_MODE_STATIC_STRIPS_HORIZONTAL:
             numBlocks = 1;
+            processStaticBlocks(data, numBlocks);
             break;
         case PART_MODE_STATIC_STRIPS_VERTICAL:
             numBlocks = 1;
+            processStaticBlocks(data, numBlocks);
             break;
         case PART_MODE_STATIC_BLOCKS:
         {
@@ -54,6 +149,7 @@ void slaveMain(ConfigData* data)
                             + (leftoverY > 0 ? numBlocksX : 0)
                             + ((leftoverX > 0 && leftoverY > 0) ? 1 : 0);
             numBlocks = totalBlocks / data->mpi_procs + (data->mpi_rank < (totalBlocks % data->mpi_procs) ? 1 : 0);
+            processStaticBlocks(data, numBlocks);
             break;
         }
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
@@ -62,6 +158,7 @@ void slaveMain(ConfigData* data)
             // the number of rows that are not evenly divisible by the number of processes
             int blockCount = (data->height + data->cycleSize - 1) / data->cycleSize;
             numBlocks = blockCount / data->mpi_procs + (data->mpi_rank < blockCount % data->mpi_procs ? 1 : 0);
+            processStaticBlocks(data, numBlocks);
             break;
         }
         case PART_MODE_STATIC_CYCLES_VERTICAL:
@@ -70,21 +167,12 @@ void slaveMain(ConfigData* data)
             // the number of columns that are not evenly divisible by the number of processes
             int blockCount = (data->width + data->cycleSize - 1) / data->cycleSize;
             numBlocks = blockCount / data->mpi_procs + (data->mpi_rank < blockCount % data->mpi_procs ? 1 : 0);
+            processStaticBlocks(data, numBlocks);
             break;
         }
         case PART_MODE_DYNAMIC:
         {
-            int numBlocksX = data->width / data->dynamicBlockWidth;
-            int numBlocksY = data->height / data->dynamicBlockHeight;
-            int leftoverX = data->width % data->dynamicBlockWidth;
-            int leftoverY = data->height % data->dynamicBlockHeight;
-            int totalBlocks = numBlocksX * numBlocksY
-                            + (leftoverX > 0 ? numBlocksY : 0)
-                            + (leftoverY > 0 ? numBlocksX : 0)
-                            + ((leftoverX > 0 && leftoverY > 0) ? 1 : 0);
-            int workerCount = data->mpi_procs - 1;  // workers are ranks 1..mpi_procs-1
-            int workerID = data->mpi_rank - 1;      // adjust since rank 0 is master
-            numBlocks = totalBlocks / workerCount + (workerID < (totalBlocks % workerCount) ? 1 : 0);
+            processDynamicBlocks(data);
             break;
         }
         default:
@@ -92,48 +180,6 @@ void slaveMain(ConfigData* data)
             std::cout << ") is not currently implemented." << std::endl;
             break;
     }
-
-    double totalCompTime = 0.0;
-
-    // headers array
-    BlockHeader* headers = new BlockHeader[numBlocks];
-    // pixel buffers array
-    float** pixels = new float*[numBlocks];
-
-    for (int i = 0; i < numBlocks; i++) {
-        // get our block assignment from the master
-        BlockHeader header;
-        MPI_Recv(&header, 1, MPI_BlockHeader, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-        // store header in array
-        headers[i].blockStartX = header.blockStartX;
-        headers[i].blockStartY = header.blockStartY;
-        headers[i].blockWidth = header.blockWidth;
-        headers[i].blockHeight = header.blockHeight;
-
-        // allocate pixel buffer
-        int numPixels = 3 * header.blockWidth * header.blockHeight;
-        float* pixelBuffer = new float[numPixels];
-
-
-        double startTime = MPI_Wtime();
-        processBlock(data, &header, pixelBuffer, true);
-        double stopTime = MPI_Wtime();
-        double compTime = stopTime - startTime;
-        totalCompTime += compTime;
-
-        // store pixel buffer in array
-        pixels[i] = pixelBuffer;
-    }
-
-    sendBlocks(totalCompTime, numBlocks, headers, pixels);
-
-    // clean up
-    for (int i = 0; i < numBlocks; i++) {
-        delete[] pixels[i];
-    }
-    delete[] pixels;
-    delete[] headers;
 }
 
 
