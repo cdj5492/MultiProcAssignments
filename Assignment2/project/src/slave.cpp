@@ -1,4 +1,4 @@
-//This file contains the code that the master process will execute.
+//This file contains the code that the slave processes will execute.
 
 #include <iostream>
 #include <mpi.h>
@@ -50,6 +50,7 @@ void processStaticBlocks(ConfigData* data, int numBlocks) {
     }
     delete[] pixels;
     delete[] headers;
+    MPI_Type_free(&MPI_BlockHeader);
 }
 
 void processDynamicBlocks(ConfigData* data) {
@@ -69,9 +70,9 @@ void processDynamicBlocks(ConfigData* data) {
             break;
         }
 
-        std::cout << "Rank " << data->mpi_rank << " received block assignment: "
-                << header.blockStartX << ", " << header.blockStartY << ", "
-                << header.blockWidth << ", " << header.blockHeight << std::endl;
+        // std::cout << "Rank " << data->mpi_rank << " received block assignment: "
+        //         << header.blockStartX << ", " << header.blockStartY << ", "
+        //         << header.blockWidth << ", " << header.blockHeight << std::endl;
 
         // allocate pixel buffer
         int numPixels = 3 * header.blockWidth * header.blockHeight;
@@ -83,10 +84,10 @@ void processDynamicBlocks(ConfigData* data) {
         double compTime = stopTime - startTime;
         totalCompTime += compTime;
 
-        std::cout << "Rank " << data->mpi_rank << " finished processing block: "
-                << header.blockStartX << ", " << header.blockStartY << ", "
-                << header.blockWidth << ", " << header.blockHeight
-                << " in " << compTime << " seconds" << std::endl;
+        // std::cout << "Rank " << data->mpi_rank << " finished processing block: "
+        //         << header.blockStartX << ", " << header.blockStartY << ", "
+        //         << header.blockWidth << ", " << header.blockHeight
+        //         << " in " << compTime << " seconds" << std::endl;
 
 
         sendBlocks(totalCompTime, 1, &header, &pixelBuffer);
@@ -94,6 +95,8 @@ void processDynamicBlocks(ConfigData* data) {
         // clean up
         delete[] pixelBuffer;
     }
+
+    MPI_Type_free(&MPI_BlockHeader);
 }
 
 void slaveMain(ConfigData* data) {

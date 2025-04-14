@@ -2,7 +2,7 @@
 #include <cstring>
 #include <iostream>
 
-#define DEBUG_COLORING
+// #define DEBUG_COLORING
 
 void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
     for( int i = 0; i < header->blockHeight; ++i ) {
@@ -13,8 +13,11 @@ void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
             //Calculate the index into the array.
             int baseIndex = 3 * ( row * header->blockWidth + column );
 
-            std::cout << "Rank " << data->mpi_rank << " processing global pixel (" << column+header->blockStartX << ", " << row+header->blockStartY 
-                << ") in block (" << header->blockStartX << ", " << header->blockStartY << ")" << std::endl;
+            // std::cout << "Rank " << data->mpi_rank << " processing global pixel (" << column+header->blockStartX << ", " << row+header->blockStartY 
+            //     << ") in block (" << header->blockStartX << ", " << header->blockStartY << ")" << std::endl;
+
+            // raytrace the pixel
+            shadePixel(&(blockData[baseIndex]), row + header->blockStartY, column + header->blockStartX,data);
 
             #ifdef DEBUG_COLORING
             // color based on which rank it is (hsv coloring)
@@ -40,15 +43,13 @@ void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
             }
 
             // print out colors
-            std::cout << "Rank " << data->mpi_rank << " pixel (" << column+header->blockStartX << ", " << row+header->blockStartY 
-                << ") color: (" << r << ", " << g << ", " << b << ")" << std::endl;
+            // std::cout << "Rank " << data->mpi_rank << " pixel (" << column+header->blockStartX << ", " << row+header->blockStartY 
+            //     << ") color: (" << r << ", " << g << ", " << b << ")" << std::endl;
 
+            // overwrite raytraced pixel with debug color
             blockData[baseIndex] = r;
             blockData[baseIndex + 1] = g;
             blockData[baseIndex + 2] = b;
-            #else
-            // raytrace the pixel
-            shadePixel(&(blockData[baseIndex]), row + header->blockStartY, column + header->blockStartX,data);
             #endif
         }
     }
