@@ -6,7 +6,7 @@ MPICC = mpic++ -D_GLIBCXX_USE_CXX11_ABI=0 -DOMPI_SKIP_MPICXX=1
 
 # When running locally, add the flag -no-pie
 # ref: https://www.redhat.com/en/blog/position-independent-executables-pie
-FLAGS = -Wextra -Wall -Iinclude -g $(shell pkg-config --cflags libpng)
+FLAGS = -Wextra -Wall -Iinclude -g -no-pie $(shell pkg-config --cflags libpng)
 
 LIBS = raytrace
 LIBSPATH = objs/x86_64

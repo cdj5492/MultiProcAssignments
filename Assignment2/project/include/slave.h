@@ -6,8 +6,6 @@
 
 void slaveMain( ConfigData *data );
 
-void sendBlocks(double compTime, int numBlocks,
-                BlockHeader* blockHeaders,
-                float* blockData[]);
+char* processStaticBlocks(ConfigData* data, int numBlocks, MPI_Request* request);
 
 #endif

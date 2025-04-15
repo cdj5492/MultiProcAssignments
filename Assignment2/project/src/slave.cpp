@@ -7,7 +7,61 @@
 #include "slave.h"
 #include "blockOps.h"
 
-void processStaticBlocks(ConfigData* data, int numBlocks) {
+char* sendBlocks(double compTime, int numBlocks,
+        BlockHeader* blockHeaders,
+        float* blockData[],
+        MPI_Request* request) {
+    // space for packing
+    int packSize = 0, tempSize = 0;
+    // compTime (double)
+    MPI_Pack_size(1, MPI_DOUBLE, MPI_COMM_WORLD, &tempSize);
+    packSize += tempSize;
+    // numBlocks (int)
+    MPI_Pack_size(1, MPI_INT, MPI_COMM_WORLD, &tempSize);
+    packSize += tempSize;
+
+    // std::cout << " sending " << numBlocks << " blocks" << std::endl;
+
+    // loop through each block
+    for (int i = 0; i < numBlocks; ++i) {
+        // pack 4 ints for header of each block
+        MPI_Pack_size(4, MPI_INT, MPI_COMM_WORLD, &tempSize);
+        packSize += tempSize;
+        // pack pixel data
+        int numPixels = 3 * blockHeaders[i].blockWidth * blockHeaders[i].blockHeight;
+        MPI_Pack_size(numPixels, MPI_FLOAT, MPI_COMM_WORLD, &tempSize);
+        packSize += tempSize;
+    }
+
+    // alloc buffer for packed data
+    char* buffer = new char[packSize];
+    int position = 0;
+
+    // std::cout << " packing " << packSize << " bytes" << std::endl;
+
+    MPI_Pack(&compTime, 1, MPI_DOUBLE, buffer, packSize, &position, MPI_COMM_WORLD);
+    MPI_Pack(&numBlocks, 1, MPI_INT, buffer, packSize, &position, MPI_COMM_WORLD);
+
+    for (int i = 0; i < numBlocks; ++i) {
+        int headerData[4] = {blockHeaders[i].blockStartX, blockHeaders[i].blockStartY, blockHeaders[i].blockWidth, blockHeaders[i].blockHeight};
+        MPI_Pack(headerData, 4, MPI_INT, buffer, packSize, &position, MPI_COMM_WORLD);
+        int numPixels = 3 * blockHeaders[i].blockWidth * blockHeaders[i].blockHeight;
+        MPI_Pack(blockData[i], numPixels, MPI_FLOAT, buffer, packSize, &position, MPI_COMM_WORLD);
+    }
+
+    // std::cout << " sending packed data of size " << position << std::endl;
+
+    // this line blocks, but only for static partitioning for some reason
+    MPI_Isend(buffer, position, MPI_PACKED, 0, 2, MPI_COMM_WORLD, request);
+
+    // std::cout << " sent packed data" << std::endl;
+
+    // don't delete the buffer here, since it is still being used by the send.
+    // Let the caller free it.
+    return buffer;
+}
+
+char* processStaticBlocks(ConfigData* data, int numBlocks, MPI_Request* request) {
     MPI_Datatype MPI_BlockHeader = create_block_header_type();
     double totalCompTime = 0.0;
 
@@ -15,6 +69,8 @@ void processStaticBlocks(ConfigData* data, int numBlocks) {
     BlockHeader* headers = new BlockHeader[numBlocks];
     // pixel buffers array
     float** pixels = new float*[numBlocks];
+
+    // std::cout << "Starting static block processing. Rank:" << data->mpi_rank << std::endl;
 
     for (int i = 0; i < numBlocks; i++) {
         // get our block assignment from the master
@@ -42,7 +98,11 @@ void processStaticBlocks(ConfigData* data, int numBlocks) {
         pixels[i] = pixelBuffer;
     }
 
-    sendBlocks(totalCompTime, numBlocks, headers, pixels);
+    // std::cout << "Ending static block processing. Rank:" << data->mpi_rank << std::endl;
+
+    char* buffer = sendBlocks(totalCompTime, numBlocks, headers, pixels, request);
+
+    // std::cout << "Rank " << data->mpi_rank << " finished processing all blocks." << std::endl;
 
     // clean up
     for (int i = 0; i < numBlocks; i++) {
@@ -51,6 +111,8 @@ void processStaticBlocks(ConfigData* data, int numBlocks) {
     delete[] pixels;
     delete[] headers;
     MPI_Type_free(&MPI_BlockHeader);
+
+    return buffer;
 }
 
 void processDynamicBlocks(ConfigData* data) {
@@ -59,6 +121,7 @@ void processDynamicBlocks(ConfigData* data) {
 
     MPI_Datatype MPI_BlockHeader = create_block_header_type();
     MPI_Status status;
+    MPI_Request request;
     double totalCompTime = 0.0;
 
     while (true) {
@@ -70,9 +133,9 @@ void processDynamicBlocks(ConfigData* data) {
             break;
         }
 
-        std::cout << "Rank " << data->mpi_rank << " received block assignment: "
-                << header.blockStartX << ", " << header.blockStartY << ", "
-                << header.blockWidth << ", " << header.blockHeight << std::endl;
+        // std::cout << "Rank " << data->mpi_rank << " received block assignment: "
+        //         << header.blockStartX << ", " << header.blockStartY << ", "
+        //         << header.blockWidth << ", " << header.blockHeight << std::endl;
 
         // allocate pixel buffer
         int numPixels = 3 * header.blockWidth * header.blockHeight;
@@ -84,16 +147,18 @@ void processDynamicBlocks(ConfigData* data) {
         double compTime = stopTime - startTime;
         totalCompTime += compTime;
 
-        std::cout << "Rank " << data->mpi_rank << " finished processing block: "
-                << header.blockStartX << ", " << header.blockStartY << ", "
-                << header.blockWidth << ", " << header.blockHeight
-                << " in " << compTime << " seconds" << std::endl;
+        // std::cout << "Rank " << data->mpi_rank << " finished processing block: "
+        //         << header.blockStartX << ", " << header.blockStartY << ", "
+        //         << header.blockWidth << ", " << header.blockHeight
+        //         << " in " << compTime << " seconds" << std::endl;
 
 
-        sendBlocks(totalCompTime, 1, &header, &pixelBuffer);
+        char* buffer = sendBlocks(totalCompTime, 1, &header, &pixelBuffer, &request);
+        MPI_Wait(&request, MPI_STATUS_IGNORE);
 
         // clean up
         delete[] pixelBuffer;
+        delete[] buffer;
     }
 
     MPI_Type_free(&MPI_BlockHeader);
@@ -103,6 +168,8 @@ void slaveMain(ConfigData* data) {
     // should be calculated based on the partitioning scheme
     int numBlocks = 0;
 
+    MPI_Request request;
+
     // Just calculates how many blocks the slave will be processing up front
     switch (data->partitioningMode)
     {
@@ -110,13 +177,21 @@ void slaveMain(ConfigData* data) {
             //The slave will do nothing since this means sequential operation.
             break;
         case PART_MODE_STATIC_STRIPS_HORIZONTAL:
+        {
             numBlocks = 1;
-            processStaticBlocks(data, numBlocks);
+            char* buffer = processStaticBlocks(data, numBlocks, &request);
+            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] buffer;
             break;
+        }
         case PART_MODE_STATIC_STRIPS_VERTICAL:
+        {
             numBlocks = 1;
-            processStaticBlocks(data, numBlocks);
+            char* buffer = processStaticBlocks(data, numBlocks, &request);
+            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] buffer;
             break;
+        }
         case PART_MODE_STATIC_BLOCKS:
         {
             int blockSize;
@@ -145,7 +220,9 @@ void slaveMain(ConfigData* data) {
                             + (leftoverY > 0 ? numBlocksX : 0)
                             + ((leftoverX > 0 && leftoverY > 0) ? 1 : 0);
             numBlocks = totalBlocks / data->mpi_procs + (data->mpi_rank < (totalBlocks % data->mpi_procs) ? 1 : 0);
-            processStaticBlocks(data, numBlocks);
+            char* buffer = processStaticBlocks(data, numBlocks, &request);
+            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] buffer;
             break;
         }
         case PART_MODE_STATIC_CYCLES_HORIZONTAL:
@@ -154,7 +231,9 @@ void slaveMain(ConfigData* data) {
             // the number of rows that are not evenly divisible by the number of processes
             int blockCount = (data->height + data->cycleSize - 1) / data->cycleSize;
             numBlocks = blockCount / data->mpi_procs + (data->mpi_rank < blockCount % data->mpi_procs ? 1 : 0);
-            processStaticBlocks(data, numBlocks);
+            char* buffer = processStaticBlocks(data, numBlocks, &request);
+            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] buffer;
             break;
         }
         case PART_MODE_STATIC_CYCLES_VERTICAL:
@@ -163,7 +242,9 @@ void slaveMain(ConfigData* data) {
             // the number of columns that are not evenly divisible by the number of processes
             int blockCount = (data->width + data->cycleSize - 1) / data->cycleSize;
             numBlocks = blockCount / data->mpi_procs + (data->mpi_rank < blockCount % data->mpi_procs ? 1 : 0);
-            processStaticBlocks(data, numBlocks);
+            char* buffer = processStaticBlocks(data, numBlocks, &request);
+            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] buffer;
             break;
         }
         case PART_MODE_DYNAMIC:
@@ -178,45 +259,3 @@ void slaveMain(ConfigData* data) {
     }
 }
 
-
-void sendBlocks(double compTime, int numBlocks,
-        BlockHeader* blockHeaders,
-        float* blockData[]) {
-    // space for packing
-    int packSize = 0, tempSize = 0;
-    // compTime (double)
-    MPI_Pack_size(1, MPI_DOUBLE, MPI_COMM_WORLD, &tempSize);
-    packSize += tempSize;
-    // numBlocks (int)
-    MPI_Pack_size(1, MPI_INT, MPI_COMM_WORLD, &tempSize);
-    packSize += tempSize;
-
-    // loop through each block
-    for (int i = 0; i < numBlocks; ++i) {
-        // pack 4 ints for header of each block
-        MPI_Pack_size(4, MPI_INT, MPI_COMM_WORLD, &tempSize);
-        packSize += tempSize;
-        // pack pixel data
-        int numPixels = 3 * blockHeaders[i].blockWidth * blockHeaders[i].blockHeight;
-        MPI_Pack_size(numPixels, MPI_FLOAT, MPI_COMM_WORLD, &tempSize);
-        packSize += tempSize;
-    }
-
-    // alloc buffer for packed data
-    char* buffer = new char[packSize];
-    int position = 0;
-
-    MPI_Pack(&compTime, 1, MPI_DOUBLE, buffer, packSize, &position, MPI_COMM_WORLD);
-    MPI_Pack(&numBlocks, 1, MPI_INT, buffer, packSize, &position, MPI_COMM_WORLD);
-
-    for (int i = 0; i < numBlocks; ++i) {
-        int headerData[4] = {blockHeaders[i].blockStartX, blockHeaders[i].blockStartY, blockHeaders[i].blockWidth, blockHeaders[i].blockHeight};
-        MPI_Pack(headerData, 4, MPI_INT, buffer, packSize, &position, MPI_COMM_WORLD);
-        int numPixels = 3 * blockHeaders[i].blockWidth * blockHeaders[i].blockHeight;
-        MPI_Pack(blockData[i], numPixels, MPI_FLOAT, buffer, packSize, &position, MPI_COMM_WORLD);
-    }
-
-    MPI_Send(buffer, position, MPI_PACKED, 0, 2, MPI_COMM_WORLD);
-
-    delete[] buffer;
-}
