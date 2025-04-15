@@ -6,6 +6,10 @@
 
 void slaveMain( ConfigData *data );
 
-char* processStaticBlocks(ConfigData* data, int numBlocks, MPI_Request* request);
+double processStaticBlocks(ConfigData* data, int numBlocks, BlockHeader **headers, float ***pixels);
+
+void packBlocks(double compTime, int numBlocks,
+    BlockHeader* blockHeaders,
+    float* blockData[], char** buffer, int* position);
 
 #endif

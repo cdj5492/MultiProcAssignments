@@ -5,34 +5,25 @@
 #include <iostream>
 #include <mpi.h>
 #include <queue>
+#include <thread>
+#include <cstring>
 
 #include "RayTrace.h"
 #include "master.h"
 #include "slave.h"
 #include "blockOps.h"
 
-double receiveAndProcessOne(ConfigData *data, float *pixels, int rank, MPI_Status *status) {
-    MPI_Probe(rank, 2, MPI_COMM_WORLD, status);
-    int messageSize = 0;
-    MPI_Get_count(status, MPI_PACKED, &messageSize);
-    char *buffer = new char[messageSize];
-    MPI_Recv(buffer, messageSize, MPI_PACKED, rank, 2, MPI_COMM_WORLD,
-            status);
-
-    // int fromRank = status->MPI_SOURCE;
-
+// just the unpacking and processing of one message
+double processOne(ConfigData *data, char *buffer, float *pixels, MPI_Status *status, int messageSize) {
     // begin unpacking
     int position = 0;
     double compTime;
     int numBlocks;
-    MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE,
-            MPI_COMM_WORLD);
-    MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT,
-            MPI_COMM_WORLD);
+    MPI_Unpack(buffer, messageSize, &position, &compTime, 1, MPI_DOUBLE, MPI_COMM_WORLD);
+    MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
 
     // for debug, just print out the compTime
-    // std::cout << "Rank " << fromRank << " computation time: " << compTime <<
-    // std::endl;
+    std::cout << "Rank " << status->MPI_SOURCE << " computation time: " << compTime << std::endl;
 
     // unpack header and pixel data for each block
     for (int i = 0; i < numBlocks; ++i) {
@@ -46,9 +37,9 @@ double receiveAndProcessOne(ConfigData *data, float *pixels, int rank, MPI_Statu
         header.blockHeight = headerData[3];
 
         // print block info, including which rank it came from
-        // std::cout << "Received block from rank " << fromRank << ": " <<
-        // header.blockStartX << ", " << header.blockStartY << ", " <<
-        // header.blockWidth << ", " << header.blockHeight << std::endl;
+        std::cout << "Received block from rank " << status->MPI_SOURCE << ": " <<
+        header.blockStartX << ", " << header.blockStartY << ", " <<
+        header.blockWidth << ", " << header.blockHeight << std::endl;
 
         int numPixels = 3 * header.blockWidth * header.blockHeight;
 
@@ -69,6 +60,20 @@ double receiveAndProcessOne(ConfigData *data, float *pixels, int rank, MPI_Statu
             delete[] blockData;
         }
     }
+
+    return compTime;
+}
+
+double receiveAndProcessOne(ConfigData *data, float *pixels, int rank, MPI_Status *status) {
+
+    MPI_Probe(rank, 2, MPI_COMM_WORLD, status);
+    int messageSize = 0;
+    MPI_Get_count(status, MPI_PACKED, &messageSize);
+    char *buffer = new char[messageSize];
+    MPI_Recv(buffer, messageSize, MPI_PACKED, rank, 2, MPI_COMM_WORLD, status);
+
+    double compTime = processOne(data, buffer, pixels, status, messageSize);
+
     delete[] buffer;
 
     return compTime;
@@ -76,9 +81,9 @@ double receiveAndProcessOne(ConfigData *data, float *pixels, int rank, MPI_Statu
 
 double receiveAndProcessStatic(ConfigData *data, float *pixels, MPI_Status *status) {
     double largestCompTime = 0.0;
-    for (int rank = 0; rank < data->mpi_procs; ++rank) {
+    for (int rank = 1; rank < data->mpi_procs; ++rank) {
         double compTime;
-        // std::cout << "Receiving block from rank " << rank << std::endl;
+        std::cout << "Receiving block from rank " << rank << std::endl;
         compTime = receiveAndProcessOne(data, pixels, rank, status);
 
         if (compTime > largestCompTime) {
@@ -137,13 +142,23 @@ void masterMain(ConfigData *data) {
                 MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
             }
 
-            MPI_Request request;
-            char* buffer = processStaticBlocks(data, 1, &request);
+            BlockHeader *headers;
+            float **pixelBuffers;
+            double compTimeMaster = processStaticBlocks(data, 1, &headers, &pixelBuffers);
 
-            // Get all the data back from the slaves
-            largestCompTime = receiveAndProcessStatic(data, pixels, &status);
+            char *buffer;
+            int messageSize = 0;
+            packBlocks(compTimeMaster, 1, headers, pixelBuffers, &buffer, &messageSize);
+            processOne(data, buffer, pixels, &status, messageSize);
+            
+            double largestCompTimeSlave = receiveAndProcessStatic(data, pixels, &status);
+            largestCompTime = std::max(largestCompTimeSlave, compTimeMaster);
 
-            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] headers;
+            for (int i = 0; i < 1; i++) {
+                delete[] pixelBuffers[i];
+            }
+            delete[] pixelBuffers;
             delete[] buffer;
 
             break;
@@ -166,15 +181,24 @@ void masterMain(ConfigData *data) {
                 MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
             }
 
-            MPI_Request request;
-            char* buffer = processStaticBlocks(data, 1, &request);
+            BlockHeader *headers;
+            float **pixelBuffers;
+            double compTimeMaster = processStaticBlocks(data, 1, &headers, &pixelBuffers);
 
-            // Get all the data back from the slaves
-            largestCompTime = receiveAndProcessStatic(data, pixels, &status);
+            char *buffer;
+            int messageSize = 0;
+            packBlocks(compTimeMaster, 1, headers, pixelBuffers, &buffer, &messageSize);
+            processOne(data, buffer, pixels, &status, messageSize);
+            
+            double largestCompTimeSlave = receiveAndProcessStatic(data, pixels, &status);
+            largestCompTime = std::max(largestCompTimeSlave, compTimeMaster);
 
-            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] headers;
+            for (int i = 0; i < 1; i++) {
+                delete[] pixelBuffers[i];
+            }
+            delete[] pixelBuffers;
             delete[] buffer;
-
             break;
         }
         case PART_MODE_STATIC_BLOCKS: 
@@ -205,48 +229,58 @@ void masterMain(ConfigData *data) {
             int leftoverX = data->width % blockSize;
             int leftoverY = data->height % blockSize;
 
+            int numMasterBlocks = 0;
+
             int assignRank = 0;
 
             for (int y = 0; y < numBlocksY; ++y) {
                 for (int x = 0; x < numBlocksX; ++x) {
-                BlockHeader header;
-                header.blockStartX = x * blockSize;
-                header.blockStartY = y * blockSize;
-                header.blockWidth = blockSize;
-                header.blockHeight = blockSize;
+                    BlockHeader header;
+                    header.blockStartX = x * blockSize;
+                    header.blockStartY = y * blockSize;
+                    header.blockWidth = blockSize;
+                    header.blockHeight = blockSize;
 
-                // send out full blocks to each slave
-                MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
+                    // send out full blocks to each slave
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
 
-                assignRank = (assignRank + 1) % data->mpi_procs;
+                    if (assignRank == data->mpi_rank) {
+                        numMasterBlocks++;
+                    }
+
+                    assignRank = (assignRank + 1) % data->mpi_procs;
                 }
             }
 
             // send out leftover blocks to each slave
             if (leftoverX > 0) {
                 for (int y = 0; y < numBlocksY; ++y) {
-                BlockHeader header;
-                header.blockStartX = numBlocksX * blockSize;
-                header.blockStartY = y * blockSize;
-                header.blockWidth = leftoverX;
-                header.blockHeight = blockSize;
+                    BlockHeader header;
+                    header.blockStartX = numBlocksX * blockSize;
+                    header.blockStartY = y * blockSize;
+                    header.blockWidth = leftoverX;
+                    header.blockHeight = blockSize;
 
-                MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
 
-                assignRank = (assignRank + 1) % data->mpi_procs;
+                    assignRank = (assignRank + 1) % data->mpi_procs;
                 }
             }
             if (leftoverY > 0) {
                 for (int x = 0; x < numBlocksX; ++x) {
-                BlockHeader header;
-                header.blockStartX = x * blockSize;
-                header.blockStartY = numBlocksY * blockSize;
-                header.blockWidth = blockSize;
-                header.blockHeight = leftoverY;
+                    BlockHeader header;
+                    header.blockStartX = x * blockSize;
+                    header.blockStartY = numBlocksY * blockSize;
+                    header.blockWidth = blockSize;
+                    header.blockHeight = leftoverY;
 
-                MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
+                    MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
 
-                assignRank = (assignRank + 1) % data->mpi_procs;
+                    if (assignRank == data->mpi_rank) {
+                        numMasterBlocks++;
+                    }
+
+                    assignRank = (assignRank + 1) % data->mpi_procs;
                 }
             }
 
@@ -259,15 +293,28 @@ void masterMain(ConfigData *data) {
                 header.blockHeight = leftoverY;
 
                 MPI_Send(&header, 1, MPI_BlockHeader, assignRank, 1, MPI_COMM_WORLD);
+                if (assignRank == data->mpi_rank) {
+                    numMasterBlocks++;
+                }
             }
 
-            MPI_Request request;
-            char* buffer = processStaticBlocks(data, 1, &request);
+            BlockHeader *headers;
+            float **pixelBuffers;
+            double compTimeMaster = processStaticBlocks(data, numMasterBlocks, &headers, &pixelBuffers);
 
-            // Get all the data back from the slaves
-            largestCompTime = receiveAndProcessStatic(data, pixels, &status);
+            char *buffer;
+            int messageSize = 0;
+            packBlocks(compTimeMaster, numMasterBlocks, headers, pixelBuffers, &buffer, &messageSize);
+            processOne(data, buffer, pixels, &status, messageSize);
+            
+            double largestCompTimeSlave = receiveAndProcessStatic(data, pixels, &status);
+            largestCompTime = std::max(largestCompTimeSlave, compTimeMaster);
 
-            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] headers;
+            for (int i = 0; i < numMasterBlocks; i++) {
+                delete[] pixelBuffers[i];
+            }
+            delete[] pixelBuffers;
             delete[] buffer;
 
             break;
@@ -275,6 +322,8 @@ void masterMain(ConfigData *data) {
         case PART_MODE_STATIC_CYCLES_HORIZONTAL: 
         {
             // send out each row to a different slave
+            int numMasterBlocks = 0;
+            int rank = 0;
             for (int row = 0; row < data->height; row += data->cycleSize) {
                 BlockHeader header;
                 header.blockStartX = 0;
@@ -283,16 +332,32 @@ void masterMain(ConfigData *data) {
                 header.blockHeight = std::min(data->cycleSize, data->height - row);
 
                 MPI_Send(&header, 1, MPI_BlockHeader,
-                        (row / data->cycleSize) % data->mpi_procs, 1, MPI_COMM_WORLD);
+                        rank, 1, MPI_COMM_WORLD);
+
+                if (rank == data->mpi_rank) {
+                    numMasterBlocks++;
+                }
+
+                rank = (rank + 1) % data->mpi_procs;
             }
 
-            MPI_Request request;
-            char* buffer = processStaticBlocks(data, 1, &request);
+            BlockHeader *headers;
+            float **pixelBuffers;
+            double compTimeMaster = processStaticBlocks(data, numMasterBlocks, &headers, &pixelBuffers);
 
-            // Get all the data back from the slaves
-            largestCompTime = receiveAndProcessStatic(data, pixels, &status);
+            char *buffer;
+            int messageSize = 0;
+            packBlocks(compTimeMaster, numMasterBlocks, headers, pixelBuffers, &buffer, &messageSize);
+            processOne(data, buffer, pixels, &status, messageSize);
+            
+            double largestCompTimeSlave = receiveAndProcessStatic(data, pixels, &status);
+            largestCompTime = std::max(largestCompTimeSlave, compTimeMaster);
 
-            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] headers;
+            for (int i = 0; i < numMasterBlocks; i++) {
+                delete[] pixelBuffers[i];
+            }
+            delete[] pixelBuffers;
             delete[] buffer;
 
             break;
@@ -300,6 +365,8 @@ void masterMain(ConfigData *data) {
         case PART_MODE_STATIC_CYCLES_VERTICAL:
         {
             // send out each column to a different slave
+            int numMasterBlocks = 0;
+            int rank = 0;
             for (int column = 0; column < data->height; column += data->cycleSize) {
                 BlockHeader header;
                 header.blockStartX = column;
@@ -308,16 +375,32 @@ void masterMain(ConfigData *data) {
                 header.blockHeight = data->height;
 
                 MPI_Send(&header, 1, MPI_BlockHeader,
-                        (column / data->cycleSize) % data->mpi_procs, 1, MPI_COMM_WORLD);
+                        rank, 1, MPI_COMM_WORLD);
+
+                if (rank == data->mpi_rank) {
+                    numMasterBlocks++;
+                }
+
+                rank = (rank + 1) % data->mpi_procs;
             }
 
-            MPI_Request request;
-            char* buffer = processStaticBlocks(data, 1, &request);
+            BlockHeader *headers;
+            float **pixelBuffers;
+            double compTimeMaster = processStaticBlocks(data, numMasterBlocks, &headers, &pixelBuffers);
 
-            // Get all the data back from the slaves
-            largestCompTime = receiveAndProcessStatic(data, pixels, &status);
+            char *buffer;
+            int messageSize = 0;
+            packBlocks(compTimeMaster, numMasterBlocks, headers, pixelBuffers, &buffer, &messageSize);
+            processOne(data, buffer, pixels, &status, messageSize);
+            
+            double largestCompTimeSlave = receiveAndProcessStatic(data, pixels, &status);
+            largestCompTime = std::max(largestCompTimeSlave, compTimeMaster);
 
-            MPI_Wait(&request, MPI_STATUS_IGNORE);
+            delete[] headers;
+            for (int i = 0; i < numMasterBlocks; i++) {
+                delete[] pixelBuffers[i];
+            }
+            delete[] pixelBuffers;
             delete[] buffer;
 
             break;
@@ -340,37 +423,37 @@ void masterMain(ConfigData *data) {
 
             for (int y = 0; y < numBlocksY; ++y) {
                 for (int x = 0; x < numBlocksX; ++x) {
-                BlockHeader header;
-                header.blockStartX = x * data->dynamicBlockWidth;
-                header.blockStartY = y * data->dynamicBlockHeight;
-                header.blockWidth = data->dynamicBlockWidth;
-                header.blockHeight = data->dynamicBlockHeight;
+                    BlockHeader header;
+                    header.blockStartX = x * data->dynamicBlockWidth;
+                    header.blockStartY = y * data->dynamicBlockHeight;
+                    header.blockWidth = data->dynamicBlockWidth;
+                    header.blockHeight = data->dynamicBlockHeight;
 
-                blockQueue.push(header);
+                    blockQueue.push(header);
                 }
             }
 
             // send out leftover blocks to each slave
             if (leftoverX > 0) {
                 for (int y = 0; y < numBlocksY; ++y) {
-                BlockHeader header;
-                header.blockStartX = numBlocksX * data->dynamicBlockWidth;
-                header.blockStartY = y * data->dynamicBlockHeight;
-                header.blockWidth = leftoverX;
-                header.blockHeight = data->dynamicBlockHeight;
+                    BlockHeader header;
+                    header.blockStartX = numBlocksX * data->dynamicBlockWidth;
+                    header.blockStartY = y * data->dynamicBlockHeight;
+                    header.blockWidth = leftoverX;
+                    header.blockHeight = data->dynamicBlockHeight;
 
-                blockQueue.push(header);
+                    blockQueue.push(header);
                 }
             }
             if (leftoverY > 0) {
                 for (int x = 0; x < numBlocksX; ++x) {
-                BlockHeader header;
-                header.blockStartX = x * data->dynamicBlockWidth;
-                header.blockStartY = numBlocksY * data->dynamicBlockHeight;
-                header.blockWidth = data->dynamicBlockWidth;
-                header.blockHeight = leftoverY;
+                    BlockHeader header;
+                    header.blockStartX = x * data->dynamicBlockWidth;
+                    header.blockStartY = numBlocksY * data->dynamicBlockHeight;
+                    header.blockWidth = data->dynamicBlockWidth;
+                    header.blockHeight = leftoverY;
 
-                blockQueue.push(header);
+                    blockQueue.push(header);
                 }
             }
 
@@ -390,7 +473,7 @@ void masterMain(ConfigData *data) {
                 BlockHeader header = blockQueue.front();
                 blockQueue.pop();
                 while (processQueue.empty()) {
-                    // std::cout << "Rank " << data->mpi_rank << " waiting for a block" << std::endl;
+                    std::cout << "Rank " << data->mpi_rank << " waiting for a block" << std::endl;
                     double compTime = receiveAndProcessOne(data, pixels, MPI_ANY_SOURCE, &status);
                     if (compTime > largestCompTime) {
                         largestCompTime = compTime;
@@ -398,14 +481,14 @@ void masterMain(ConfigData *data) {
                     int rank = status.MPI_SOURCE;
                     processQueue.push(rank);
 
-                    // std::cout << "Rank " << rank << " finished processing a block" << std::endl;
+                    std::cout << "Rank " << rank << " finished processing a block" << std::endl;
                 }
                 int rank = processQueue.front();
                 processQueue.pop();
                 MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
-                // std::cout << "Sent block to rank " << rank << ": "
-                //         << header.blockStartX << ", " << header.blockStartY << ", "
-                //         << header.blockWidth << ", " << header.blockHeight << std::endl;
+                std::cout << "Sent block to rank " << rank << ": "
+                        << header.blockStartX << ", " << header.blockStartY << ", "
+                        << header.blockWidth << ", " << header.blockHeight << std::endl;
             }
             // receive the last blocks from the slaves
             while ((int)processQueue.size() != data->mpi_procs - 1) {

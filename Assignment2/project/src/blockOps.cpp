@@ -2,7 +2,7 @@
 #include <cstring>
 #include <iostream>
 
-// #define DEBUG_COLORING
+#define DEBUG_COLORING
 
 void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
     for( int i = 0; i < header->blockHeight; ++i ) {
