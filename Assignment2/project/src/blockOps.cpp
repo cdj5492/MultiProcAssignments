@@ -2,7 +2,7 @@
 #include <cstring>
 #include <iostream>
 
-// #define DEBUG_COLORING
+#define DEBUG_COLORING
 
 void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
     for( int i = 0; i < header->blockHeight; ++i ) {
@@ -43,8 +43,8 @@ void processBlock(ConfigData* data, BlockHeader* header, float* blockData) {
             }
 
             // print out colors
-            // std::cout << "Rank " << data->mpi_rank << " pixel (" << column+header->blockStartX << ", " << row+header->blockStartY 
-            //     << ") color: (" << r << ", " << g << ", " << b << ")" << std::endl;
+            std::cout << "Rank " << data->mpi_rank << " pixel (" << column+header->blockStartX << ", " << row+header->blockStartY 
+                << ") color: (" << r << ", " << g << ", " << b << ")" << std::endl;
 
             // overwrite raytraced pixel with debug color
             blockData[baseIndex] = r;

@@ -70,9 +70,9 @@ void processDynamicBlocks(ConfigData* data) {
             break;
         }
 
-        // std::cout << "Rank " << data->mpi_rank << " received block assignment: "
-        //         << header.blockStartX << ", " << header.blockStartY << ", "
-        //         << header.blockWidth << ", " << header.blockHeight << std::endl;
+        std::cout << "Rank " << data->mpi_rank << " received block assignment: "
+                << header.blockStartX << ", " << header.blockStartY << ", "
+                << header.blockWidth << ", " << header.blockHeight << std::endl;
 
         // allocate pixel buffer
         int numPixels = 3 * header.blockWidth * header.blockHeight;
@@ -84,10 +84,10 @@ void processDynamicBlocks(ConfigData* data) {
         double compTime = stopTime - startTime;
         totalCompTime += compTime;
 
-        // std::cout << "Rank " << data->mpi_rank << " finished processing block: "
-        //         << header.blockStartX << ", " << header.blockStartY << ", "
-        //         << header.blockWidth << ", " << header.blockHeight
-        //         << " in " << compTime << " seconds" << std::endl;
+        std::cout << "Rank " << data->mpi_rank << " finished processing block: "
+                << header.blockStartX << ", " << header.blockStartY << ", "
+                << header.blockWidth << ", " << header.blockHeight
+                << " in " << compTime << " seconds" << std::endl;
 
 
         sendBlocks(totalCompTime, 1, &header, &pixelBuffer);
