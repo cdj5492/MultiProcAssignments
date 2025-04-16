@@ -42,4 +42,4 @@
 # indicated by the -n option. If these do not, your results will
 # not be valid or you may have wasted resources that others could
 # have used.
-./raytrace_seq -h 100 -w 100 -c configs/twhitted.xml -p none
+./raytrace_seq -h 5000 -w 5000 -c configs/twhitted.xml -p none

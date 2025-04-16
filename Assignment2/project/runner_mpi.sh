@@ -29,11 +29,11 @@
 #SBATCH --account=kgcoe-mps
 #SBATCH --get-user-env
 # number of tasks 
-#SBATCH --ntasks=6
+#SBATCH --ntasks=64
 # maximum run duration (your peers will thank you)
-#SBATCH --time=0-0:30:0
-# maximum memory overall
-#SBATCH --mem=64000M
+#SBATCH --time=0-1:0:0
+# maximum memory per CPU
+#SBATCH --mem-per-cpu=4000M
 
 #
 # Your job script goes below this line.
@@ -63,7 +63,22 @@ spack env activate cmpe-655
 # srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_strips_vertical
 
 # Static Cycles
-srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_vertical -cs 2
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 1
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 5
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 10 
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 20
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 27
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 40
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 50
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 100
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 400
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 80
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 320
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 640
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 1280
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 160
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 350
+# srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_cycles_horizontal -cs 650
 
 # Static Blocks
 # srun -n $SLURM_NPROCS raytrace_mpi -h 5000 -w 5000 -c configs/twhitted.xml -p static_blocks 

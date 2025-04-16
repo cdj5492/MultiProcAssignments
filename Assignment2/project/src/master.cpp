@@ -23,7 +23,7 @@ double processOne(ConfigData *data, char *buffer, float *pixels, MPI_Status *sta
     MPI_Unpack(buffer, messageSize, &position, &numBlocks, 1, MPI_INT, MPI_COMM_WORLD);
 
     // for debug, just print out the compTime
-    std::cout << "Rank " << status->MPI_SOURCE << " computation time: " << compTime << std::endl;
+    // std::cout << "Rank " << status->MPI_SOURCE << " computation time: " << compTime << std::endl;
 
     // unpack header and pixel data for each block
     for (int i = 0; i < numBlocks; ++i) {
@@ -37,9 +37,9 @@ double processOne(ConfigData *data, char *buffer, float *pixels, MPI_Status *sta
         header.blockHeight = headerData[3];
 
         // print block info, including which rank it came from
-        std::cout << "Received block from rank " << status->MPI_SOURCE << ": " <<
-        header.blockStartX << ", " << header.blockStartY << ", " <<
-        header.blockWidth << ", " << header.blockHeight << std::endl;
+        // std::cout << "Received block from rank " << status->MPI_SOURCE << ": " <<
+        // header.blockStartX << ", " << header.blockStartY << ", " <<
+        // header.blockWidth << ", " << header.blockHeight << std::endl;
 
         int numPixels = 3 * header.blockWidth * header.blockHeight;
 
@@ -83,7 +83,7 @@ double receiveAndProcessStatic(ConfigData *data, float *pixels, MPI_Status *stat
     double largestCompTime = 0.0;
     for (int rank = 1; rank < data->mpi_procs; ++rank) {
         double compTime;
-        std::cout << "Receiving block from rank " << rank << std::endl;
+        // std::cout << "Receiving block from rank " << rank << std::endl;
         compTime = receiveAndProcessOne(data, pixels, rank, status);
 
         if (compTime > largestCompTime) {
@@ -473,7 +473,7 @@ void masterMain(ConfigData *data) {
                 BlockHeader header = blockQueue.front();
                 blockQueue.pop();
                 while (processQueue.empty()) {
-                    std::cout << "Rank " << data->mpi_rank << " waiting for a block" << std::endl;
+                    // std::cout << "Rank " << data->mpi_rank << " waiting for a block" << std::endl;
                     double compTime = receiveAndProcessOne(data, pixels, MPI_ANY_SOURCE, &status);
                     if (compTime > largestCompTime) {
                         largestCompTime = compTime;
@@ -481,14 +481,14 @@ void masterMain(ConfigData *data) {
                     int rank = status.MPI_SOURCE;
                     processQueue.push(rank);
 
-                    std::cout << "Rank " << rank << " finished processing a block" << std::endl;
+                    // std::cout << "Rank " << rank << " finished processing a block" << std::endl;
                 }
                 int rank = processQueue.front();
                 processQueue.pop();
                 MPI_Send(&header, 1, MPI_BlockHeader, rank, 1, MPI_COMM_WORLD);
-                std::cout << "Sent block to rank " << rank << ": "
-                        << header.blockStartX << ", " << header.blockStartY << ", "
-                        << header.blockWidth << ", " << header.blockHeight << std::endl;
+                // std::cout << "Sent block to rank " << rank << ": "
+                //         << header.blockStartX << ", " << header.blockStartY << ", "
+                //         << header.blockWidth << ", " << header.blockHeight << std::endl;
             }
             // receive the last blocks from the slaves
             while ((int)processQueue.size() != data->mpi_procs - 1) {

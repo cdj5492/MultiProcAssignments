@@ -18,6 +18,11 @@ int main( int argc, char* argv[] )
 {
     //Keep the data that will be used for the scene.
     ConfigData data;
+
+    //MPI Intialization
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &data.mpi_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &data.mpi_procs);
     
     //Try to initialize the scene.
     bool result = initialize(&argc, &argv, &data);
@@ -26,11 +31,6 @@ int main( int argc, char* argv[] )
     {
         MPI_Abort(MPI_COMM_WORLD, MPI_ERR_OTHER);
     }
-
-    //MPI Intialization
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &data.mpi_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &data.mpi_procs);
 
     if( data.mpi_rank == 0 )
     {
